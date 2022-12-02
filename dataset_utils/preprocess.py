@@ -37,7 +37,6 @@ def crop_roi_from_image(img: np.ndarray):
     cnt = max(cnts, key = cv2.contourArea)
     x, y, w, h = cv2.boundingRect(cnt)
     return img[y:y+h, x:x+w, ...]
-    return breast_mask
 
 def convert_fun(img_path: Path, dest_path: Path):
     dest_path.parent.mkdir(parents=True, exist_ok=True)
