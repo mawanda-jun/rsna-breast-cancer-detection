@@ -1,0 +1,43 @@
+# Dataset options
+dataset_path: "/data/GoogleUniversalImageEmbedding/data/CLIP/by_chunks"
+train_dataset: "/projects/GoogleUniversalImageEmbedding/dataset_info/train_synset_ids.txt"
+val_dataset: "/projects/GoogleUniversalImageEmbedding/dataset_info/val_synset_ids.txt"
+
+# Do not modify!
+multiplier: 10000
+train_features: 10520947
+train_synset_ids: 15333
+val_features: 2632533
+val_synset_ids: 3834
+
+# EXP TYPE
+dataset_type: SameClassDataset  # NoiseItemDataset or SingleItemDataset or SameClassDataset
+model_type: DualProjection  # DualProjection or OriginalFeatureSpace for training an autoencoder
+
+# Network options
+in_features: 768
+hidden_features: 4096
+out_features: 64
+dropout: 0.2
+
+# Training options
+batch_size: 1850  # 1850 for 2048, 1950 for 1024, 2000 for 512  CLIP
+# Optimizer options
+lr: 4.e-2  # From paper: 0.3 * batch_size / 256  -> 2.28!! Better 2.e-2
+lars: True
+base_optimizer: SGD  # Adam, OldLARS, SGD
+weight_decay: 1.0e-6
+momentum: 0.9
+eps: 1.e-8
+trust_coef: 0.01
+device: cuda:0
+temperature: 0.07
+# Steps
+train_steps: 10
+val_steps: 40
+# Total epochs
+epochs: 5
+
+# Checkpoint option
+exp_path: "/data/GoogleUniversalImageEmbedding/experiments/SimCLR-4096-SGDLARS-trust01"
+save_steps: 200
