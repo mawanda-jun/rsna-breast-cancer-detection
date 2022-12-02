@@ -1,0 +1,20 @@
+# General requirements
+autopep8
+gradio
+pylint
+timm
+ftfy
+regex
+tqdm
+git+https://github.com/openai/CLIP.git
+# For GoogleUniversalImageEmbedding
+# torchlars
+# For optimizations
+numba
+
+
+# For this particular competition
+pydicom
+pylibjpeg
+pylibjpeg-openjpeg
+pylibjpeg-libjpeg
