@@ -1,0 +1,4 @@
+pydicom
+pylibjpeg
+pylibjpeg-openjpeg
+pylibjpeg-libjpeg
