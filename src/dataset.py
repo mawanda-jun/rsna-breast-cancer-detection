@@ -105,7 +105,7 @@ class TrainBatchSampler(Sampler):
 
 class ValBatchSampler(BatchSampler):
     """
-    Create custom batch sampler in order to create a batch of indexes with balanced positives/negatives.
+    Create custom batch sampler that returns patiend_ids strings instead of indexes.
     """
     def __init__(self, dataset: RSNA_BCD_Dataset, batch_size: int):
         super().__init__(sampler=list(dataset.patient_ids.keys()), batch_size=batch_size, drop_last=False)
