@@ -3,199 +3,128 @@ from typing import List
 from pathlib import Path
 import random
 import torch
-from torch.utils.data import Dataset, DataLoader, Sampler
+from torch.utils.data import Dataset, DataLoader, Sampler, BatchSampler
 from tqdm import tqdm
+import yaml
+from yaml import CSafeLoader
 import numpy as np
+from PIL import Image
+from albumentations import Compose, transforms, Resize
 
-from utils import parse_pb
 
-
-class GUIE_BaseDataset(Dataset):
+class RSNA_BCD_Dataset(Dataset):
     def __init__(
             self, 
             dataset_path: Path, 
-            synset_ids: List[str],
-            multiplier: int,
-            mock_length: int
+            patient_ids_path: str,
+            keep_num: int,
+            transform = None
         ):
-        """_summary_
-        Use mock_length so dataloader is resetted only after one epoch - and not after
-        finishing the far-less classes.
-        Args:
-            dataset_path (Path): _description_
-            synset_ids (List[str]): _description_
-            multiplier (int): _description_
-            mock_length (int): _description_
-        """
         super().__init__()
-        # Extract information about dataset
-        all_files = dataset_path.glob("*.pb")
-        self.multiplier = multiplier
-        self.mock_length = mock_length
-        self.synset_ids = synset_ids
-
-        # Index file by category: keep path/to/cat/chunks together, indexed by synset cat id provided.
-        synset_paths = {k: [] for k in synset_ids}
-        for file in tqdm(all_files, desc='Creating index...', total=6581546):
-            cat = str(file.name).split("_")[0]
-            if cat in synset_paths:
-                synset_paths[cat].append(str(file))
-
-        # Create mapping
-        # self.idx_mapper = [synset_id for synset_id in synset_paths.keys()]
-        # Avoid memory leak using numpy: https://github.com/pytorch/pytorch/issues/13246#issuecomment-1164905242
-        # All array must have the same length in order to convert them to a numpy matrix
-        max_paths = max([len(v) for v in synset_paths.values()])
-        for k, v in tqdm(synset_paths.items(), desc="Fixing number of paths for the DataFrame..."):
-            synset_paths[k] += [""]*(max_paths - len(v))
-        # Keep only list of lists of paths
-        synset_paths = list(synset_paths.values())
-        self.synset_paths = np.array(synset_paths).astype(np.string_)
+        self.dataset_path = dataset_path
+        print("Loading ids...")
+        with open(patient_ids_path, 'r') as reader:
+            self.patient_ids = yaml.load(reader, Loader=CSafeLoader)
+        print("Ids loaded!")
+        self.keep_num = keep_num
+        self.transform = transform
     
     def __len__(self):
-        return self.mock_length
-
-    def _get_features(self, idx, num=None):
-        # Rationale of getitem:
-        # - idx select which category we are dealing with
-        # - from the category, select two random paths: we will extract the features from these two files
-        #   -> the two paths might be the same (random.choices instead of random.sample). This is 
-        #      intentional since we want to possibly return the same features, or the features inside the
-        #      same file
-        # - parse the two paths and extract the features. For each file, in this configuration, there will be
-        #   2 features.
-        # - select one of the two features for each file.
-        # Now we have two features of the same category, which we are going to return.
-
-        synset_paths = [l.decode() for l in self.synset_paths[idx] if l.decode() != ""]
-        if num == None:
-            selected_synset_paths = synset_paths
-        else:
-            selected_synset_paths = random.choices(population=synset_paths, k=num)
+        return len(list(self.patient_ids.keys()))
+    
+    def __getitem__(self, patient_id_laterality):
+        img_ids, categories = self.patient_ids[patient_id_laterality]
+        patient_id = patient_id_laterality.split("_")[0]
+        img_paths = [self.dataset_path / Path(str(patient_id)) / Path(f"{img_id}.png") for img_id in img_ids]
+        random.shuffle(img_paths)  # So that, in case there are more then 3, we select always different images.
         
-        features = [random.sample(parse_pb(path)[0], 1)[0] for path in selected_synset_paths]
-        features = [f.astype(np.float32) / self.multiplier for f in features]
-        return features
-    
+        imgs = [np.asarray(Image.open(img_path)) for img_path in img_paths]
+        # Keep always <keep_num> images. If there are less, add an empty image
+        while len(imgs) < self.keep_num:
+            imgs.append(np.zeros_like(imgs[0]))
+        if len(imgs) > self.keep_num:
+            imgs = imgs[:self.keep_num]
 
-class GUIE_DualFeatures(GUIE_BaseDataset):
-    def __init__(self, dataset_path: Path, synset_ids: List[str], multiplier: int, mock_length: int):
-        super().__init__(dataset_path, synset_ids, multiplier, mock_length)
-
-    @staticmethod
-    def collate_fn(batch):
-        batch = np.asarray(batch)
-        batch_0 = batch[:, 0, ...]
-        batch_1 = batch[:, 1, ...]
-        return torch.tensor(batch_0), torch.tensor(batch_1)
-
-class GUIE_SingleFeatures(GUIE_BaseDataset):
-    def __init__(self, dataset_path: Path, synset_ids: List[str], multiplier: int, mock_length: int):
-        super().__init__(dataset_path, synset_ids, multiplier, mock_length)
+        # Apply transform
+        if self.transform is not None:
+            imgs = [np.repeat(np.expand_dims(self.transform(image=img)['image'], -1), 3, -1) for img in imgs]
+        
+        return imgs, categories[0]  # Every item in patient_id/laterality has the same category!
 
     @staticmethod
     def collate_fn(batch):
-        batch = np.asarray(batch)
-        return [torch.tensor(batch)]
+        """
+        This function is responsible for managing shapes. We want to have:
+        (B, C, H, W, G) aka batch size, channels, height, width and group of mammographies.
+        """
+        images = []
+        categories = []
+        for block in batch:
+            # Here image comes as (G, H, W, C), so we permute the first and fourth axis.
+            img = torch.tensor(np.array(block[0])).permute(3, 1, 2, 0)
+            label = torch.tensor(np.array(block[1]))
+            images.append(img)
+            categories.append(label)
+        images = torch.stack(images, 0)
+        categories = torch.stack(categories, 0)
+        return images, categories
 
-class GUIE_AllFeatures(GUIE_BaseDataset):
-    def __init__(self, dataset_path: Path, synset_ids: List[str], multiplier: int, mock_length: int):
-        super().__init__(dataset_path, synset_ids, multiplier, mock_length)
-
-    @staticmethod
-    def collate_fn(batch):
-        batch = np.asarray(batch)
-        batch = torch.tensor(batch)
-        batch = torch.cat(batch, 1)
-        return torch.tensor(batch)
-
-
-#############################
-# CUSTOM AND USEFUL DATASETS
-#############################
-class SameClassDataset(GUIE_DualFeatures):
+class TrainBatchSampler(Sampler):
     """
-    Returns two features that comes from the same class. Might be the same feature altogehter
-    (even though it's a quite rare occurrence).
+    Create custom batch sampler in order to create a batch of indexes with balanced positives/negatives.
     """
-    def __init__(self, dataset_path: Path, synset_ids: List[str], multiplier: int, mock_length: int):
-        super().__init__(dataset_path, synset_ids, multiplier, mock_length)
-    
-    def __getitem__(self, idx):
-        features = self._get_features(idx, num=2)
-        return features
-
-class NoiseItemDataset(GUIE_DualFeatures):
-    """
-    Returns one feature and the same feature with some gaussian noise applied.
-    """
-    def __init__(self, dataset_path: Path, synset_ids: List[str], multiplier: int, mock_length: int):
-        super().__init__(dataset_path, synset_ids, multiplier, mock_length)
-
-    def __getitem__(self, idx):
-        features = self._get_features(idx, num=1)[0]
-        # Add random noise
-        noise = np.random.normal(0, 0.1, size=features.shape).astype(features.dtype)
-        return features, features + noise
-
-class SingleItemDataset(GUIE_SingleFeatures):
-    """
-    Returns only one feature, but it's in the same list format for the sake of the training.
-    """
-    def __init__(self, dataset_path: Path, synset_ids: List[str], multiplier: int, mock_length: int):
-        super().__init__(dataset_path, synset_ids, multiplier, mock_length)
-
-    def __getitem__(self, idx):
-        return self._get_features(idx, num=1)[0]
-
-
-class EvalDataset(GUIE_AllFeatures):
-    """
-    Returns only one feature, but it's in the same list format for the sake of the training.
-    """
-    def __init__(self, dataset_path: Path, synset_ids: List[str], multiplier: int, mock_length: int):
-        super().__init__(dataset_path, synset_ids, multiplier, mock_length)
-
-    def __getitem__(self, idx):
-        return self._get_features(idx)
-
-
-class CustomBatchSampler(Sampler):
-    """
-    Create custom batch sampler in order to create a batch of indexes that are not repeated for each batch.
-
-    Args:
-        Sampler (_type_): _description_
-    """
-    def __init__(self, dataset: GUIE_BaseDataset, batch_size: int):
+    def __init__(self, dataset: RSNA_BCD_Dataset, batch_size: int):
         self.dataset = dataset
         self.batch_size = batch_size
-        # self.real_index = np.arange(0, len(self.dataset.synset_ids))
-        assert len(dataset) >= batch_size, f"Not enough elements for a batch! Please input a batch size <= {len(self.real_index)}"
+        # Inizialize positives and negatives.
+        self.positives = []
+        self.negatives = []
+        for patient_id, arr in dataset.patient_ids.items():
+            if arr[1][0] == 0:
+                self.negatives.append(patient_id)
+            else:
+                self.positives.append(patient_id)
 
     def generate_batch(self):
+        # Make a balanced loader!
         while True:
-            yield np.random.choice(len(self.dataset.synset_ids), self.batch_size, replace=False)
+            batch = []
+            for _ in range(self.batch_size):
+                if random.random() > 0.5:
+                    # Select positive index
+                    batch.append(random.choice(self.positives))
+                else:
+                    batch.append(random.choice(self.negatives))
+            yield batch
 
     def __iter__(self):
         return iter(self.generate_batch())
-
+    
     def __len__(self):
         return len(self.dataset)
 
+class ValBatchSampler(BatchSampler):
+    """
+    Create custom batch sampler in order to create a batch of indexes with balanced positives/negatives.
+    """
+    def __init__(self, dataset: RSNA_BCD_Dataset, batch_size: int):
+        super().__init__(sampler=list(dataset.patient_ids.keys()), batch_size=batch_size, drop_last=False)
+
+
 if "__main__" in __name__:
-    dataset = GUIE_BaseDataset(
-        dataset_path = Path("/data/GoogleUniversalImageEmbedding/data/by_chunks"),
-        synset_ids = open("/projects/GoogleUniversalImageEmbedding/dataset_info/train_synset_ids.txt").read().splitlines(),
-        multiplier = 10000,
-        mock_length = 100000
+    transform = Compose([Resize(512, 512, p=1)])
+    dataset = RSNA_BCD_Dataset(
+        dataset_path = Path("/data/rsna-breast-cancer-detection/train_images_png"),
+        patient_ids_path = Path("/projects/rsna-breast-cancer-detection/src/configs/train_ids.yaml"),
+        keep_num=3,
+        transform=transform
     )
-    batch_size = 153
+    batch_size = 40
     dataloader = DataLoader(
+        batch_sampler=TrainBatchSampler(dataset, batch_size),
         dataset=dataset,
-        batch_sampler=CustomBatchSampler(dataset, batch_size),
         collate_fn=dataset.collate_fn,
-        num_workers=10,
+        num_workers=0,
         pin_memory=True
     )
 

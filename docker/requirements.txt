@@ -1,4 +1,5 @@
 # General requirements
+albumentations
 autopep8
 gradio
 pylint
