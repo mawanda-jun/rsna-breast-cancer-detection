@@ -4,12 +4,11 @@ from pathlib import Path
 import random
 import torch
 from torch.utils.data import Dataset, DataLoader, Sampler, BatchSampler
-from tqdm import tqdm
 import yaml
 from yaml import CSafeLoader
 import numpy as np
 from PIL import Image
-from albumentations import Compose, transforms, Resize
+from albumentations import Compose, Resize
 
 
 class RSNA_BCD_Dataset(Dataset):
@@ -65,6 +64,7 @@ class RSNA_BCD_Dataset(Dataset):
             label = torch.tensor(np.array(block[1]))
             images.append(img)
             categories.append(label)
+        # Prepare batch on first dimension.
         images = torch.stack(images, 0)
         categories = torch.stack(categories, 0)
         return images, categories
