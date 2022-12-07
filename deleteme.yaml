@@ -1,0 +1,7 @@
+aug:
+- RandomBrightnessContrast:
+    hue: 0.1
+    saturation: 0.3
+- RandomBrightnessContrast:
+    hue: 0.4
+    saturation: 0.5

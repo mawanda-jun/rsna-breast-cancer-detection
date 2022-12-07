@@ -1,52 +1,59 @@
 import argparse
 import yaml
 from pathlib import Path
-import os
 from torch.utils.data import DataLoader
-import SimCLR_dataset
-from model import SimCLRContrastiveLearning
+from dataset import RSNA_BCD_Dataset, TrainBatchSampler, ValBatchSampler, TestBatchSampler
+from model import RSNABCE
+import albumentations as A
 
 def main(cfg_path: str):
     # Import configuration
     with open(cfg_path, 'r') as file:
         args = yaml.safe_load(file)
 
-    # Redefine args so it takes epochs in consideration
-    args['steps'] = args['train_features'] // args['batch_size']
-    args['steps'] *= args['epochs']
-    args['save_steps'] *= args['epochs']
+    # Define transforms
+    val_transforms = [A.Resize(args['img_size'], args['img_size'], p=1)]
+    train_transforms = [
+        A.__dict__[list(aug.keys())[0]](**list(aug.values())[0]) 
+            for aug in args['augmentations']
+        ]
 
     # Define dataset
-    dataset_path = Path(args["dataset_path"])
-    train_ids = open(args["train_dataset"], 'r').read().splitlines()
-    val_ids = open(args["val_dataset"], 'r').read().splitlines()
-
-    train_set = SimCLR_dataset.__dict__[args['dataset_type']](
-        dataset_path, 
-        train_ids, 
-        args['multiplier'],
-        args['train_features']
-        )
-    val_set = SimCLR_dataset.__dict__[args['dataset_type']](
-        dataset_path, 
-        val_ids, 
-        args['multiplier'],
-        mock_length=args['val_features']
+    train_set = RSNA_BCD_Dataset(
+        dataset_path=Path(args["dataset_path"]), 
+        patient_ids_path=Path(args["train_dataset"]), 
+        keep_num=args['keep_num'],
+        transform=A.Compose(train_transforms + val_transforms)
+    )
+    
+    val_set = RSNA_BCD_Dataset(
+        dataset_path=Path(args["dataset_path"]), 
+        patient_ids_path=Path(args["val_dataset"]), 
+        keep_num=args['keep_num'],
+        transform=A.Compose(val_transforms)
     )
 
     train_loader = DataLoader(
         dataset=train_set,
-        batch_sampler=SimCLR_dataset.__dict__['CustomBatchSampler'](train_set, args['batch_size']),
+        batch_sampler=TrainBatchSampler(train_set, args['batch_size']),
         collate_fn=train_set.collate_fn,
-        num_workers=os.cpu_count(),
+        num_workers=args['train_workers'],
         pin_memory=True
     )
 
     val_loader = DataLoader(
         dataset=val_set,
-        batch_sampler=SimCLR_dataset.__dict__['CustomBatchSampler'](val_set, args['batch_size']),
+        batch_sampler=ValBatchSampler(val_set, args['batch_size']),
         collate_fn=val_set.collate_fn,
-        num_workers=os.cpu_count(),
+        num_workers=args['val_workers'],
+        pin_memory=True
+    )
+
+    test_loader = DataLoader(
+        dataset=val_set,
+        batch_sampler=TestBatchSampler(val_set, args['batch_size']),
+        collate_fn=val_set.collate_fn,
+        num_workers=args['test_workers'],
         pin_memory=True
     )
 
@@ -55,13 +62,13 @@ def main(cfg_path: str):
 
     # Save configuration
     with open(Path(args['exp_path']) / Path("config.yaml"), 'w') as writer:
-        yaml.safe_dump(data=args, stream=writer)
+        yaml.safe_dump(data=args, stream=writer, sort_keys=False)
     
     # Define and train model
-    SimCLRContrastiveLearning(args).train(train_loader, val_loader)
+    RSNABCE(args).train(train_loader, val_loader, test_loader)
 
 if "__main__" in __name__:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--path", type=str, help="path/to/config.yaml", default="/projects/GoogleUniversalImageEmbedding/config/config.yaml")
+    parser.add_argument("--path", type=str, help="path/to/config.yaml", default="/projects/rsna-breast-cancer-detection/src/configs/eff4_allaug_cyclic.yaml")
     args = parser.parse_args()
     main(args.path)

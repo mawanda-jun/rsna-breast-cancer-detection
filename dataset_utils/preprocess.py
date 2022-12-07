@@ -62,7 +62,6 @@ def convert_dataset(dataset_dir: Path, output_dir: Path):
         ), total=len(input_paths)))
     
 
-
 if "__main__" in __name__:
     # img_path = Path("/data/rsna-breast-cancer-detection/train_images/5325/324732883.dcm")
     # Image.fromarray(read_xray(img_path)).save("img.png")
