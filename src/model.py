@@ -13,7 +13,6 @@ import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 
 
-
 def load_optimizer(args, model: nn.Module) -> Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.CosineAnnealingLR]:
     # optimized using LARS with linear learning rate scaling
     # (i.e. LearningRate = 0.3 × BatchSize/256) and weight decay of 10−6.
@@ -24,22 +23,10 @@ def load_optimizer(args, model: nn.Module) -> Tuple[torch.optim.Optimizer, torch
     )
     schedulers = {}
     # "decay the learning rate with the cosine decay schedule without restarts"
+    # Register cosine annealing just to set the base_lr right
     cosine_annealing = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, args['epochs']*args['train_steps'], eta_min=0, last_epoch=-1
     )
-    torch.optim.lr_scheduler.CosineAnnealingWarmRestarts()
-    # Add CyclicLR to escape local minima
-    cyclicLR = torch.optim.lr_scheduler.CyclicLR(
-        optimizer=optimizer,
-        base_lr=optimizer.param_groups[0]['lr'],
-        max_lr=optimizer.param_groups[0]['lr'] / 10,
-        step_size_up = args['train_steps'] // 2, 
-        step_size_down = args['train_steps'] // 2,
-        cycle_momentum=False,
-        last_epoch=-1 
-    )
-    cyclic_annealing = torch.optim.lr_scheduler.ChainedScheduler([cyclicLR, cosine_annealing])
-    schedulers['cyclic_annealing'] = cyclic_annealing
 
     # Add warmup 
     warmup = torch.optim.lr_scheduler.CyclicLR(
@@ -49,7 +36,20 @@ def load_optimizer(args, model: nn.Module) -> Tuple[torch.optim.Optimizer, torch
         step_size_up=args['warmup_steps'],
         cycle_momentum=False
     )
+
     schedulers['warmup'] = warmup
+    # Add CyclicLR to escape local minima
+    cyclic_lr = torch.optim.lr_scheduler.CyclicLR(
+        optimizer=optimizer,
+        base_lr=optimizer.param_groups[0]['lr'],
+        max_lr=optimizer.param_groups[0]['lr'] / 10,
+        step_size_up = args['train_steps'], 
+        step_size_down = args['train_steps'],
+        cycle_momentum=False,
+        last_epoch=args['warmup_steps'] 
+    )
+    # cyclic_annealing = torch.optim.lr_scheduler.ChainedScheduler([cyclicLR, cosine_annealing])
+    schedulers['cyclic_lr'] = cyclic_lr
 
     return optimizer, schedulers
 
@@ -102,38 +102,39 @@ class RSNABCE(nn.Module):
             self.model.train()
             train_progressbar = tqdm(range(self.args['train_steps']))
 
-            total_train_loss = 0.
             for train_step in range(self.args['train_steps']):
 
-                # warmup LR
+                # # warmup LR
                 if train_step < self.args['warmup_steps'] and epoch == 0:
                     self.schedulers['warmup'].step()
 
                 # Fetch data
-                batch = next(train_iter)
-                train_images = batch[0].to(self.args['device'])
+                train_batch = next(train_iter)
+                train_images = train_batch[0].to(self.args['device'])
                 # Normalize images
                 train_images = normalize(
                     train_images, 
                     mean=self.mean,
                     std=self.std
                 )
-                train_classes = batch[1].to(self.args['device'])
+                train_classes = train_batch[1].to(self.args['device'])
 
                 # Actual training
                 self.optimizer.zero_grad()
                 
                 with autocast():
-                    pred_logits = self.model(train_images)
-                    loss = self.criterion(pred_logits, train_classes)
+                    train_pred_logits = self.model(train_images)
+                    train_pred_logits, train_sim_loss = train_pred_logits
+                    train_cat_loss = self.criterion(train_pred_logits, train_classes)
+                    train_loss = train_cat_loss + train_sim_loss
 
-                scaler.scale(loss).backward()
+                scaler.scale(train_loss).backward()
                 scaler.step(self.optimizer)
                 scaler.update()
 
                 # Print some info
                 lr = self.optimizer.param_groups[0]["lr"]
-                train_progressbar.set_description(f"TrainLoss: {loss.item():.4f}  LR: {lr:.6f}", refresh=True)
+                train_progressbar.set_description(f"TrainLoss: {train_loss.item():.4f}  LR: {lr:.6f}", refresh=True)
                 train_progressbar.update()
 
                 # Add metrics to TB
@@ -141,15 +142,28 @@ class RSNABCE(nn.Module):
                 # This is useful when comparing multiple networks.
                 # This value will be used all over the method
                 num_images += self.args['batch_size']
-                if (train_step+1) % 10 == 0:
-                    self.writer.add_scalars("Loss", {"Train": total_train_loss / (train_step + 1)}, num_images)
-                else:
-                    total_train_loss += loss.item()
+
+                if (train_step + 1) % 10 == 0:
+                    self.writer.add_scalars("Loss", {
+                        "train_total": train_loss.item(),
+                        "train_cat":  train_cat_loss.item(),
+                        "train_sim": train_sim_loss.item()
+                    }, num_images)
 
                 # Update batch scheduler
                 self.writer.add_scalar("Misc/LR", lr, num_images)
                 if train_step >= self.args['warmup_steps'] or epoch > 0:
-                    self.schedulers['cyclic_annealing'].step()
+                   self.schedulers['cyclic_lr'].step()
+                # self.schedulers['cosine_annealing'].step()
+
+            # Del resources from train so that we empty space
+            train_progressbar.close()
+            del train_batch
+            del train_cat_loss
+            del train_sim_loss
+            del train_loss
+            del train_images
+            del train_classes
 
             # Update scheduler
             # self.schedulers['cosine_annealing'].step()
@@ -158,107 +172,163 @@ class RSNABCE(nn.Module):
             # VALIDATION #
             ##############
             self.model.eval()
-            val_loader = tqdm(val_loader)
             total_val_loss = 0.
-            for batch in val_loader:
+            total_val_cat_loss = 0.
+            total_val_sim_loss = 0.
+            val_targets = []
+            val_predictions = []
+            for val_step, val_batch in enumerate(tqdm(val_loader, desc='Validating...')):
                 # Fetch data
-                val_images = batch[0].to(self.args['device'])
+                val_images = val_batch[0].to(self.args['device'])
                 # Normalize images
                 val_images = normalize(
                     val_images, 
                     mean=self.mean,
                     std=self.std
                 )
-                val_classes = batch[1].to(self.args['device'])
+                val_classes = val_batch[1].to(self.args['device'])
 
                 with torch.no_grad():
-                    pred_logits = self.model(val_images)
-                    val_loss = self.criterion(pred_logits, val_classes)
+                    val_pred_logits = self.model(val_images)
+                    val_pred_logits, val_sim_loss = val_pred_logits
+                    val_cat_loss = self.criterion(val_pred_logits, val_classes)
+                    val_loss = val_cat_loss + val_sim_loss
+
+                    # Remember predictions and targets
+                    val_targets += val_classes.squeeze(-1).tolist()
+                    val_predictions += torch.sigmoid(val_pred_logits).cpu().squeeze(-1).tolist()
                 
-                # Print some stats
-                val_loader.set_description(f"ValLoss: {val_loss.item():.4f}", refresh=True)
-                val_loader.update()
                 # Accumulate val loss
                 total_val_loss += val_loss.item()
-            self.writer.add_scalars("Loss", {"Val": total_val_loss / len(val_loader)}, num_images)
+                total_val_cat_loss += val_cat_loss.item()
+                total_val_sim_loss += val_sim_loss.item()
+
+            # Add metrics
+            val_targets = np.array(val_targets)
+            val_predictions = np.array(val_predictions)
+            
+            # Class 1
+            val_beta_1, val_pf1_score_1 = best_pfbeta(val_targets, val_predictions)
+            val_precision_1, val_recall_1 = precision_recall(val_targets, val_predictions > val_beta_1)
+            
+            # Class 0
+            val_labels_0 = np.logical_not(val_targets)
+            val_predictions_0 = 1 - val_predictions
+            val_beta_0, val_pf1_score_0 = best_pfbeta(val_labels_0, val_predictions_0)
+            val_precision_0, val_recall_0 = precision_recall(val_labels_0, val_predictions_0 > val_beta_0)
+
+            self.writer.add_scalars("ValMetrics/beta", {'beta_0': val_beta_0, 'beta_1': val_beta_1}, num_images)
+            self.writer.add_scalars("ValMetrics/pF1", {'pf1_score_0': val_pf1_score_0, 'pf1_score_1': val_pf1_score_1}, num_images)
+            self.writer.add_scalars("ValMetrics/precision", {'precision_0': val_precision_0, 'precision_1': val_precision_1}, num_images)
+            self.writer.add_scalars("ValMetrics/recall", {'recall_0': val_recall_0, 'recall_1': val_recall_1}, num_images)
+
+            self.writer.add_scalars("Loss", {
+                "val_total": total_val_loss / (val_step + 1),
+                "val_cat": total_val_cat_loss / (val_step + 1),
+                "val_sim": total_val_sim_loss / (val_step + 1)
+            }, num_images)
+
+    
+            # Del resources from train so that we empty space
+            del val_batch
+            del val_cat_loss
+            del val_sim_loss
+            del val_loss
+            del val_images
+            del val_classes
+            del val_targets
+            del val_predictions
+
 
             ########
             # TEST #
             ########
             if (epoch + 1) % self.args['test_epochs'] == 0:
                 # For validation
-                predictions = []
-                targets = []
+                test_predictions = []
+                test_targets = []
                 self.model.eval()
-                test_loader = tqdm(test_loader)
                 total_test_loss = 0.
-                for batch in test_loader:
+                total_test_cat_loss = 0.
+                total_test_sim_loss = 0.
+                for test_batch in tqdm(test_loader, desc='Testing...'):
                     # Put model in eval mode
                     # Fetch data
-                    test_images = batch[0].to(self.args['device'])
+                    test_images = test_batch[0].to(self.args['device'])
                     # Normalize images
                     test_images = normalize(
                         test_images, 
                         mean=self.mean,
                         std=self.std
                     )
-                    test_classes = batch[1].to(self.args['device'])
+                    test_classes = test_batch[1].to(self.args['device'])
 
                     with torch.no_grad():
-                        pred_logits = self.model(test_images)
-                        test_loss = self.criterion(pred_logits, test_classes)
-                    
-                    # Print some stats
-                    test_loader.set_description(f"TestLoss: {test_loss.item():.4f}", refresh=True)
-
-                    # Remember predictions and targets
-                    targets += test_classes.squeeze().tolist()
-                    predictions += torch.sigmoid(pred_logits).cpu().squeeze().tolist()
+                        test_pred_logits = self.model(test_images)
+                        test_pred_logits, test_sim_loss = test_pred_logits
+                        test_cat_loss = self.criterion(test_pred_logits, test_classes)
+                        test_loss = test_cat_loss + test_sim_loss
+                        
+                        # Remember predictions and targets
+                        test_targets += test_classes.cpu().squeeze(-1).tolist()
+                        test_predictions += torch.sigmoid(test_pred_logits).cpu().squeeze(-1).tolist()
 
                     # Accumulate test loss
                     total_test_loss += test_loss.item()
-                self.writer.add_scalars("Loss", {"Test": total_test_loss / len(test_loader)}, num_images)
+                    total_test_cat_loss += test_cat_loss.item()
+                    total_test_sim_loss += test_sim_loss.item()
+                self.writer.add_scalars("Loss", {
+                    "test_total": total_test_loss / len(test_loader),
+                    "test_cat": total_test_cat_loss / len(test_loader),
+                    "test_sim": total_test_sim_loss / len(test_loader)
+                }, num_images)
 
                 # Add metrics
-                labels = np.asarray(targets)
-                predictions = np.asarray(predictions)
+                test_targets = np.array(test_targets)
+                test_predictions = np.array(test_predictions)
                 
                 # Class 1
-                beta_1, pf1_score_1 = best_pfbeta(labels, predictions)
-                precision_1, recall_1 = precision_recall(labels, predictions)
-
-                # Thresholded/Class 1
-                predictions_T = np.copy(predictions)
-                predictions_T[predictions_T >= 0.5] = 1
-                predictions_T[predictions_T < 0.5] = 0 
-                beta, pf1_score = best_pfbeta(labels, predictions_T)
-                precision, recall = precision_recall(labels, predictions_T)
-                self.writer.add_scalar("ThresholdedAt0.5/best_beta", beta, num_images)
-                self.writer.add_scalar("ThresholdedAt0.5/pF1Atbest_beta", pf1_score, num_images)
-                self.writer.add_scalar("ThresholdedAt0.5/precision", precision, num_images)
-                self.writer.add_scalar("ThresholdedAt0.5/recall", recall, num_images)
+                test_beta_1, test_pf1_score_1 = best_pfbeta(test_targets, test_predictions)
+                test_precision_1, test_recall_1 = precision_recall(test_targets, test_predictions > test_beta_1)
                 
+                # Class 0
+                test_labels_0 = np.logical_not(test_targets)
+                test_predictions_0 = 1 - test_predictions
+                test_beta_0, test_pf1_score_0 = best_pfbeta(test_labels_0, test_predictions_0)
+                test_precision_0, test_recall_0 = precision_recall(test_labels_0, test_predictions_0 > test_beta_0)
+
+                self.writer.add_scalars("Metrics/beta", {'beta_0': test_beta_0, 'beta_1': test_beta_1}, num_images)
+                self.writer.add_scalars("Metrics/pF1", {'pf1_score_0': test_pf1_score_0, 'pf1_score_1': test_pf1_score_1}, num_images)
+                self.writer.add_scalars("Metrics/precision", {'precision_0': test_precision_0, 'precision_1': test_precision_1}, num_images)
+                self.writer.add_scalars("Metrics/recall", {'recall_0': test_recall_0, 'recall_1': test_recall_1}, num_images)
+
                 # Find pF1 score at given betas
                 pf1_scores = {}
+                precisions = {}
+                recalls = {}
                 for beta in np.linspace(0, 1, 5):
-                    pf1_scores[str(beta)] = pfbeta(labels, predictions, beta)
-                self.writer.add_scalars(f"pF1", pf1_scores, num_images)
+                    pf1_scores[str(beta)] = pfbeta(test_targets, test_predictions > beta, beta)
+                    precision, recall = precision_recall(test_targets, test_predictions > beta)
+                    precisions[str(beta)] = precision
+                    recalls[str(beta)] = recall
+                self.writer.add_scalars(f"AtBeta/pF1", pf1_scores, num_images)
+                self.writer.add_scalars(f"AtBeta/precision", precisions, num_images)
+                self.writer.add_scalars(f"AtBeta/recall", recalls, num_images)
                 
-                # For class 0
-                labels_0 = np.logical_not(labels)
-                predictions_0 = 1 - predictions
-                beta_0, pf1_score_0 = best_pfbeta(labels_0, predictions_0)
-                precision_0, recall_0 = precision_recall(labels_0, predictions_0)
+                print(f"Found best F1 of {test_pf1_score_1:.4f} at beta {test_beta_1:.2f}.")
 
-                self.writer.add_scalars("PerClass/beta", {'beta_0': beta_0, 'beta_1': beta_1}, num_images)
-                self.writer.add_scalars("PerClass/pF1", {'pf1_score_0': pf1_score_0, 'pf1_score_1': pf1_score_1}, num_images)
-                self.writer.add_scalars("PerClass/precision", {'precision_0': precision_0, 'precision_1': precision_1}, num_images)
-                self.writer.add_scalars("PerClass/recall", {'recall_0': recall_0, 'recall_1': recall_1}, num_images)
-
-                print(f"Found best F1 of {pf1_score:.4f} at beta {beta:.2f}.")
+                # Del resources from train so that we empty space
+                del test_batch
+                del test_cat_loss
+                del test_sim_loss
+                del test_loss
+                del test_images
+                del test_classes
+                del test_targets
+                del test_predictions
 
             # Save if there is something to save
-            if epoch % self.args["save_epochs"] == 0:
+            if (epoch+1) % self.args["save_epochs"] == 0:
                 self.save_model(num_images)
 
             self.writer.flush()

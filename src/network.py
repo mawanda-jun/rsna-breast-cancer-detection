@@ -38,9 +38,19 @@ class SimChiaBlock(torch.nn.Module):
     def forward(self, x: torch.Tensor):
         # Invert batch axis with stacked axis
         x = torch.stack([self.module(x_i) for x_i in x.transpose(self.stacked_axis, 0)], self.stacked_axis)
+        x_0 = torch.flatten(x[:, 0, ...])
+        x_1 = torch.flatten(x[:, 1, ...])
+        x_2 = torch.flatten(x[:, 2, ...])
+
+        # Calculate similarity loss
+        loss_01 = self.criterion(x_0,x_1, torch.tensor(1, device=x_0.device))
+        loss_12 = self.criterion(x_1, x_2, torch.tensor(1, device=x_0.device))
+        loss_02 = self.criterion(x_0, x_2, torch.tensor(1, device=x_0.device))
+        loss = (loss_01 + loss_12 + loss_02) / 3
+
         x = torch.mean(x, self.stacked_axis)
         # x = torch.logsumexp(x, self.axis) / x.size(self.axis)
-        return x
+        return x, loss
 
 class ChiaResNet(nn.Module):
     def __init__(self, backbone='resnext101_32x8d', n_classes=1, hidden_dim=1024, freeze_weights=False, dropout=0.):
@@ -83,7 +93,7 @@ class ChiaResNet(nn.Module):
         )
 
     def forward(self, x):
-        return self.network(x)
+        return self.network(x), torch.zeros(1).to(x.device)
 
 
 class ChiaEfficientNet(nn.Module):
@@ -119,8 +129,45 @@ class ChiaEfficientNet(nn.Module):
             nn.Linear(hidden_dim, n_classes)
         )
 
+    def forward(self, x:torch.Tensor):
+        return self.network(x), torch.zeros(1).to(x.device)
+
+class SimChiaEfficientNet(nn.Module):
+    def __init__(self, backbone='b4', n_classes=1, hidden_dim=1024, freeze_weights=False, dropout=0.):
+        super().__init__()
+
+        if backbone == "b2":
+            model = efficientnet_b2(weights=EfficientNet_B2_Weights.IMAGENET1K_V1)
+        elif backbone == "b4":
+            model = efficientnet_b4(weights=EfficientNet_B4_Weights.IMAGENET1K_V1)
+        else:
+            raise ValueError("Network type not implemented yet!")
+
+        # Define encoder
+        self.enc = nn.Sequential(*list(model.children())[:-2])
+        # Find output dimensions
+        num_features = self.enc[-1][-1][0].out_channels
+        if freeze_weights:
+            for param in self.enc.parameters():
+                param.requires_grad_(False)
+        
+        self.backbone = SimChiaBlock(nn.Sequential(self.enc, nn.AdaptiveMaxPool2d(1), nn.Mish()), 1)
+        self.head = nn.Sequential(
+            nn.Flatten(),
+            # nn.BatchNorm1d(nc),
+            nn.Linear(num_features, hidden_dim),
+            nn.Dropout(dropout),
+            nn.Mish(),
+            nn.Linear(hidden_dim, n_classes)
+        )
+
     def forward(self, x):
-        return self.network(x)
+        features, loss = self.backbone(x)
+        return self.head(features), loss
+
 
 if "__main__" in __name__:
-    model = ChiaEfficientNet()
+    input = torch.zeros((2, 4, 3, 512, 512))
+    model = SimChiaEfficientNet()
+    model.__repr__
+    logits, simloss = model(input)

@@ -23,6 +23,7 @@ def main(cfg_path: str):
         dataset_path=Path(args["dataset_path"]), 
         patient_ids_path=Path(args["train_dataset"]), 
         keep_num=args['keep_num'],
+        smooth=args['smooth'],
         transform=A.Compose(train_transforms + val_transforms)
     )
     
@@ -35,7 +36,7 @@ def main(cfg_path: str):
 
     train_loader = DataLoader(
         dataset=train_set,
-        batch_sampler=TrainBatchSampler(train_set, args['batch_size']),
+        batch_sampler=TrainBatchSampler(train_set, args['batch_size'], args['neg_percent']),
         collate_fn=train_set.collate_fn,
         num_workers=args['train_workers'],
         pin_memory=True
@@ -58,7 +59,10 @@ def main(cfg_path: str):
     )
 
     # Create model folder
-    Path(args["exp_path"]).mkdir(exist_ok=True, parents=True)
+    exp_path = Path(args['exp_path']) / Path(str(Path(cfg_path).name).split(".")[0])
+    args['exp_path'] = str(exp_path)
+    exp_path.mkdir(exist_ok=True, parents=True)
+    # Path(args["exp_path"]).mkdir(exist_ok=True, parents=True)
 
     # Save configuration
     with open(Path(args['exp_path']) / Path("config.yaml"), 'w') as writer:
@@ -69,6 +73,6 @@ def main(cfg_path: str):
 
 if "__main__" in __name__:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--path", type=str, help="path/to/config.yaml", default="/projects/rsna-breast-cancer-detection/src/configs/eff4_allaug_cyclic.yaml")
+    parser.add_argument("--path", type=str, help="path/to/config.yaml", default="/projects/rsna-breast-cancer-detection/src/configs/eff4_allaug_sim.yaml")
     args = parser.parse_args()
     main(args.path)

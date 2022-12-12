@@ -54,7 +54,7 @@ def convert_dataset(dataset_dir: Path, output_dir: Path):
     input_paths = list(dataset_dir.glob("**/*.dcm"))
     output_paths = [output_dir / img_path.relative_to(img_path.parent.parent).with_suffix('').with_suffix('.png') for img_path in input_paths]
 
-    with concurrent.futures.ProcessPoolExecutor(max_workers=os.cpu_count()) as worker:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=1) as worker:
         _ = list(tqdm(worker.map(
             convert_fun,
             input_paths,

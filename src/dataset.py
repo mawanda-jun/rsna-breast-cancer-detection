@@ -25,10 +25,12 @@ class RSNA_BCD_Dataset(Dataset):
             dataset_path: Path, 
             patient_ids_path: str,
             keep_num: int,
-            transform = None
+            transform = None,
+            smooth = False
         ):
         super().__init__()
         self.dataset_path = dataset_path
+        self.smooth = smooth
         print(f"Loading ids from {patient_ids_path.name}...")
         with open(patient_ids_path, 'r') as reader:
             self.patient_ids = yaml.load(reader, Loader=CSafeLoader)
@@ -62,7 +64,16 @@ class RSNA_BCD_Dataset(Dataset):
         if self.transform is not None:
             imgs = np.array([self.transform(image=img)['image'] for img in imgs])
         
-        return imgs, categories[0]  # Every item in patient_id/laterality has the same category!
+        # Every item in patient_id/laterality has the same category!
+        label = categories[0]
+        
+        if self.smooth:
+            if label == 1:
+                label = random.uniform(0.75, 1)
+            else:
+                label = random.uniform(0, 0.25)
+
+        return imgs, label  
 
     @staticmethod
     def collate_fn(batch):
@@ -87,9 +98,10 @@ class TrainBatchSampler(Sampler):
     """
     Create custom batch sampler in order to create a batch of indexes with balanced positives/negatives.
     """
-    def __init__(self, dataset: RSNA_BCD_Dataset, batch_size: int):
+    def __init__(self, dataset: RSNA_BCD_Dataset, batch_size: int, neg_percent:float):
         self.dataset = dataset
         self.batch_size = batch_size
+        self.neg_percent = neg_percent
         # Inizialize positives and negatives.
         self.positives = []
         self.negatives = []
@@ -104,7 +116,7 @@ class TrainBatchSampler(Sampler):
         while True:
             batch = []
             for _ in range(self.batch_size):
-                if random.random() > 0.1:
+                if random.random() > self.neg_percent:
                     # Select positive index
                     batch.append(random.choice(self.positives))
                 else:
