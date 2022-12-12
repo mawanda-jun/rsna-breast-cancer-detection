@@ -1,0 +1,101 @@
+# Dataset options
+dataset_path: "/data/rsna-breast-cancer-detection/train_images_png"
+train_dataset: "/projects/rsna-breast-cancer-detection/src/dataset_info/train_ids.yaml"
+val_dataset: "/projects/rsna-breast-cancer-detection/src/dataset_info/val_ids.yaml"
+keep_num: 3
+neg_percent: 0.1
+color_space: 8
+train_workers: 8
+val_workers: 4
+test_workers: 4
+img_size: 512
+smooth: True
+
+# Augmentations
+augmentations:
+# geometric
+# - RandomResizedCrop:
+#     height: 512
+#     width: 512
+#     scale: 
+#     - 0.1
+#     - 1.0
+#     p: 1
+- Flip:
+    p: 0.5
+- ShiftScaleRotate:
+    # shift_limit: 0.
+    scale_limit: 0.3
+    rotate_limit: 180
+    p: .5
+# - CoarseDropout:
+#     max_holes: 8
+#     max_height: 9
+#     max_width: 8
+#     fill_value: 0
+#     p: 0.2
+# - Perspective:
+#     p: 0.1
+# - ElasticTransform:
+#     p: 0.1
+# COLOR
+# - RandomBrightnessContrast:
+#     brightness_limit: 0.3
+#     contrast_limit: 0.3
+#     p: 0.5
+# - RandomToneCurve:
+#     scale: 0.1
+#     p: 0.5
+#     noise
+# - HueSaturationValue:
+#     p: 0.1
+- RandomGamma:
+    p: 0.5
+# - CLAHE:
+#     clip_limit: 4
+#     p: 0.2
+# - GaussianBlur:
+#     p: 0.1
+# - ImageCompression:
+#     p: 0.1
+# - ISONoise:
+#     p: 0.1
+# - PixelDropout:
+#     p: 0.1
+
+
+# EXP TYPE
+network: 
+#   - ChiaResNet:
+#       backbone: resnet50  # resnext101_32x8d, resnet50
+#       hidden_dim: 1024
+#       dropout: 0.
+- SimChiaEfficientNet:
+    backbone: b4
+    hidden_dim: 1024
+    dropout: 0.1
+
+# Training options
+# Dataset is ~24K images (but 500 positives)
+# We want the network to see 100K images
+# wanted train images per epoch: ~2000
+# wanted val images per epoch: 20% of train images -> 500
+batch_size: 13
+gradient_acc: 4 
+# Optimizer options
+weight_decay: 1.e-6
+momentum: 0.9
+eps: 1.e-8
+device: cuda:0
+lr: 1.e-4
+warmup_steps: 100
+# Total epochs. This is just a reference number, as it is not linked on how many passes we have done in the dataset.
+# the 
+epochs: 60
+# Set train, val and test frequencies
+save_epochs: 15 # Await x epochs, then save.
+train_steps: 154  # 154  # Train for n minibatches. ~ 2000 / 13
+test_epochs: 5  # Await <test_epochs> epochs, then do a full test on entire validation set
+
+# Checkpoint option
+exp_path: "/data/rsna-breast-cancer-detection/exp"
