@@ -41,6 +41,7 @@ class SimChiaBlock(torch.nn.Module):
         if act == "sigmoid": 
             self.criterion = nn.BCEWithLogitsLoss()
         elif act == "softmax":
+            self.act_fun = nn.Softmax(dim=0)
             self.criterion = nn.CrossEntropyLoss()
         elif act == 'relu':
             self.act_fun = nn.ReLU()
@@ -56,7 +57,7 @@ class SimChiaBlock(torch.nn.Module):
         x_1 = self.act_fun(torch.flatten(x[:, 1, ...]))
         x_2 = self.act_fun(torch.flatten(x[:, 2, ...]))
 
-        # Calculate similarity loss
+        # Calculate loss
         loss_01 = self.criterion(x_0, x_1)
         loss_12 = self.criterion(x_1, x_2)
         loss_02 = self.criterion(x_0, x_2)
