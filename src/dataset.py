@@ -40,6 +40,13 @@ class RSNA_BCD_Dataset(Dataset):
     
     def __len__(self):
         return len(list(self.patient_ids.keys()))
+
+    def __gray_to_rgb(self, img):
+        if len(img.shape) == 2:
+            img = np.stack([img, img, img], -1)
+        elif len(img.shape) == 3 and img.shape[-1] == 1:
+            img = np.concatenate([img, img, img], -1)
+        return img
     
     def __getitem__(self, patient_id_laterality):
         img_ids, categories = self.patient_ids[patient_id_laterality]
@@ -53,7 +60,7 @@ class RSNA_BCD_Dataset(Dataset):
         if len(img_paths) > self.keep_num:
             img_paths = img_paths[:self.keep_num]
 
-        imgs = [np.asarray(Image.open(img_path).convert('RGB')) for img_path in img_paths]
+        imgs = [self.__gray_to_rgb(np.asarray(Image.open(img_path))) for img_path in img_paths]
         # # Keep always <keep_num> images. If there are less, add an empty image
         # while len(imgs) < self.keep_num:
         #     imgs.append(np.zeros_like(imgs[0]))
@@ -84,8 +91,10 @@ class RSNA_BCD_Dataset(Dataset):
         images = []
         categories = []
         for block in batch:
+            # Convert block to int16 so there are no problems of uint8 or uint16
+            img = np.array(block[0]).astype(np.int16)
             # Here image comes as (G, H, W, C).
-            img = torch.tensor(np.array(block[0])).permute(0, 3, 1, 2)
+            img = torch.tensor(img).permute(0, 3, 1, 2)
             label = torch.tensor(np.array(block[1]))
             images.append(img)
             categories.append(label)
