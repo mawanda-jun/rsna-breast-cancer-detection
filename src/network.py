@@ -57,7 +57,7 @@ class SimChiaBlock(torch.nn.Module):
         x_1 = self.act_fun(torch.flatten(x[:, 1, ...]))
         x_2 = self.act_fun(torch.flatten(x[:, 2, ...]))
 
-        # Calculate loss
+        # Calculated loss
         loss_01 = self.criterion(x_0, x_1)
         loss_12 = self.criterion(x_1, x_2)
         loss_02 = self.criterion(x_0, x_2)

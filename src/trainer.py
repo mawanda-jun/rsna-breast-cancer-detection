@@ -73,6 +73,6 @@ def main(cfg_path: str):
 
 if "__main__" in __name__:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--path", type=str, help="path/to/config.yaml", default="/projects/rsna-breast-cancer-detection/src/configs/eff4_simsoft_baseline_neg1.yaml")
+    parser.add_argument("--path", type=str, help="path/to/config.yaml", default="/projects/rsna-breast-cancer-detection/src/configs_uint16/eff4_16_1024_smooth_neg5.yaml")
     args = parser.parse_args()
     main(args.path)
