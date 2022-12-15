@@ -25,7 +25,7 @@ def load_optimizer(args, model: nn.Module) -> Tuple[torch.optim.Optimizer, torch
     # "decay the learning rate with the cosine decay schedule without restarts"
     # Register cosine annealing just to set the base_lr right
     cosine_annealing = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, args['epochs']*args['train_steps'], eta_min=0, last_epoch=-1
+        optimizer, args['epochs']*args['train_steps']*args['gradient_acc_iters'], eta_min=0, last_epoch=-1
     )
 
     # Add warmup 
@@ -33,7 +33,7 @@ def load_optimizer(args, model: nn.Module) -> Tuple[torch.optim.Optimizer, torch
         optimizer=optimizer,
         base_lr=1e-8,
         max_lr=args['lr'],
-        step_size_up=args['warmup_steps'],
+        step_size_up=args['warmup_steps'] * args['gradient_acc_iters'],
         cycle_momentum=False
     )
 
@@ -43,8 +43,8 @@ def load_optimizer(args, model: nn.Module) -> Tuple[torch.optim.Optimizer, torch
         optimizer=optimizer,
         base_lr=optimizer.param_groups[0]['lr'],
         max_lr=optimizer.param_groups[0]['lr'] / 10,
-        step_size_up = args['train_steps'], 
-        step_size_down = args['train_steps'],
+        step_size_up = args['train_steps']*args['gradient_acc_iters'], 
+        step_size_down = args['train_steps']*args['gradient_acc_iters'],
         cycle_momentum=False,
         last_epoch=args['warmup_steps'] 
     )
@@ -100,13 +100,13 @@ class RSNABCE(nn.Module):
             # TRAINING #
             ############
             self.model.train()
-            train_progressbar = tqdm(range(self.args['train_steps']))
+            train_progressbar = tqdm(range(self.args['train_steps'] * self.args['gradient_acc_iters']))
 
-            for train_step in range(self.args['train_steps']):
-
+            for train_step in range(self.args['train_steps'] * self.args['gradient_acc_iters']):
                 # # warmup LR
-                if train_step < self.args['warmup_steps'] and epoch == 0:
+                if train_step < (self.args['warmup_steps'] * self.args['gradient_acc_iters']) and epoch == 0:
                     self.schedulers['warmup'].step()
+
 
                 # Fetch data
                 train_batch = next(train_iter)
@@ -120,22 +120,27 @@ class RSNABCE(nn.Module):
                 train_classes = train_batch[1].to(self.args['device'])
 
                 # Actual training
-                self.optimizer.zero_grad()
-                
                 with autocast():
-                    train_pred_logits = self.model(train_images)
-                    train_pred_logits, train_sim_loss = train_pred_logits
+                    train_pred_logits, train_sim_loss = self.model(train_images)
                     train_cat_loss = self.criterion(train_pred_logits, train_classes)
                     train_loss = train_cat_loss + train_sim_loss
+                    
+                    # Accumulate gradient
+                    train_loss = train_loss / self.args['gradient_acc_iters']
 
                 scaler.scale(train_loss).backward()
-                scaler.step(self.optimizer)
-                scaler.update()
 
                 # Print some info
                 lr = self.optimizer.param_groups[0]["lr"]
-                train_progressbar.set_description(f"TrainLoss: {train_loss.item():.4f}  LR: {lr:.6f}", refresh=True)
+                train_progressbar.set_description(f"TrainLoss: {train_loss.item() * self.args['gradient_acc_iters']:.4f}  LR: {lr:.6f}", refresh=True)
                 train_progressbar.update()
+
+                # Update optimizer when it's ready
+                if (train_step + 1) % self.args['gradient_acc_iters'] == 0:
+                    scaler.step(self.optimizer)
+                    scaler.update()
+                    # Reset optimizer
+                    self.optimizer.zero_grad()
 
                 # Add metrics to TB
                 # Set the number of patients that the network has seen.
@@ -143,16 +148,16 @@ class RSNABCE(nn.Module):
                 # This value will be used all over the method
                 num_images += self.args['batch_size']
 
-                if (train_step + 1) % 10 == 0:
+                if (train_step + 1) % (10 * self.args['gradient_acc_iters']) == 0:
                     self.writer.add_scalars("Loss", {
-                        "train_total": train_loss.item(),
-                        "train_cat":  train_cat_loss.item(),
-                        "train_sim": train_sim_loss.item()
+                        "train_total": train_loss.item() * self.args['gradient_acc_iters'],
+                        # "train_cat":  train_cat_loss.item(),
+                        # "train_sim": train_sim_loss.item()
                     }, num_images)
 
                 # Update batch scheduler
                 self.writer.add_scalar("Misc/LR", lr, num_images)
-                if train_step >= self.args['warmup_steps'] or epoch > 0:
+                if train_step >= (self.args['warmup_steps'] + self.args['gradient_acc_iters']) or epoch > 0:
                    self.schedulers['cyclic_lr'].step()
                 # self.schedulers['cosine_annealing'].step()
 
@@ -224,8 +229,8 @@ class RSNABCE(nn.Module):
 
             self.writer.add_scalars("Loss", {
                 "val_total": total_val_loss / (val_step + 1),
-                "val_cat": total_val_cat_loss / (val_step + 1),
-                "val_sim": total_val_sim_loss / (val_step + 1)
+                # "val_cat": total_val_cat_loss / (val_step + 1),
+                # "val_sim": total_val_sim_loss / (val_step + 1)
             }, num_images)
 
     
@@ -279,8 +284,8 @@ class RSNABCE(nn.Module):
                     total_test_sim_loss += test_sim_loss.item()
                 self.writer.add_scalars("Loss", {
                     "test_total": total_test_loss / len(test_loader),
-                    "test_cat": total_test_cat_loss / len(test_loader),
-                    "test_sim": total_test_sim_loss / len(test_loader)
+                    # "test_cat": total_test_cat_loss / len(test_loader),
+                    # "test_sim": total_test_sim_loss / len(test_loader)
                 }, num_images)
 
                 # Add metrics

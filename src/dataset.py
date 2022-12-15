@@ -44,7 +44,7 @@ class RSNA_BCD_Dataset(Dataset):
     def __getitem__(self, patient_id_laterality):
         img_ids, categories = self.patient_ids[patient_id_laterality]
         patient_id = patient_id_laterality.split("_")[0]
-        img_paths = [self.dataset_path / Path(str(patient_id)) / Path(f"{img_id}.png") for img_id in img_ids]
+        img_paths = [self.dataset_path / Path(str(patient_id)) / Path(f"{img_id}.tif") for img_id in img_ids]
         random.shuffle(img_paths)  # So that, in case there are more then 3, we select always different images.
         # # Keep always <keep_num> images. If there are less, repeat present images
         while len(img_paths) < self.keep_num:
@@ -69,9 +69,9 @@ class RSNA_BCD_Dataset(Dataset):
         
         if self.smooth:
             if label == 1:
-                label = random.uniform(0.75, 1)
+                label = random.uniform(0.85, 1)
             else:
-                label = random.uniform(0, 0.25)
+                label = random.uniform(0, 0.15)
 
         return imgs, label  
 

@@ -1,14 +1,14 @@
 # Dataset options
-dataset_path: "/data/rsna-breast-cancer-detection/train_images_png"
+dataset_path: "/data/rsna-breast-cancer-detection/train_images_tif"
 train_dataset: "/projects/rsna-breast-cancer-detection/src/dataset_info/train_ids.yaml"
 val_dataset: "/projects/rsna-breast-cancer-detection/src/dataset_info/val_ids.yaml"
 keep_num: 3
-neg_percent: 0.1
-color_space: 8
+neg_percent: 0.5
+color_space: 16
 train_workers: 8
 val_workers: 4
 test_workers: 4
-img_size: 512
+img_size: 1024
 smooth: True
 
 # Augmentations
@@ -33,20 +33,20 @@ augmentations:
 #     max_height: 9
 #     max_width: 8
 #     fill_value: 0
-#     p: 0.2
+#     p: 0.5
 # - Perspective:
 #     p: 0.1
 # - ElasticTransform:
 #     p: 0.1
 # COLOR
 # - RandomBrightnessContrast:
-#     brightness_limit: 0.3
-#     contrast_limit: 0.3
+#     brightness_limit: 0.1
+#     contrast_limit: 0.1
 #     p: 0.5
 # - RandomToneCurve:
 #     scale: 0.1
 #     p: 0.5
-#     noise
+    # noise
 # - HueSaturationValue:
 #     p: 0.1
 # - RandomGamma:
@@ -58,10 +58,14 @@ augmentations:
 #     p: 0.1
 # - ImageCompression:
 #     p: 0.1
-- ISONoise:
-    p: 0.5
+# - ISONoise:
+#     p: 0.1
 # - PixelDropout:
 #     p: 0.1
+- Resize:
+    height: 1024
+    width: 1024
+    p: 1
 
 
 # EXP TYPE
@@ -70,7 +74,7 @@ network:
 #       backbone: resnet50  # resnext101_32x8d, resnet50
 #       hidden_dim: 1024
 #       dropout: 0.
-- SimChiaEfficientNet:
+- ChiaEfficientNet:
     backbone: b4
     hidden_dim: 1024
     dropout: 0.1
@@ -80,20 +84,20 @@ network:
 # We want the network to see 100K images
 # wanted train images per epoch: ~2000
 # wanted val images per epoch: 20% of train images -> 500
-batch_size: 13
-gradient_acc: 4 
+batch_size: 3  # 13
+gradient_acc_iters: 5
 # Optimizer options
 weight_decay: 1.e-6
 momentum: 0.9
 eps: 1.e-8
 device: cuda:0
-lr: 1.e-4
+lr: 5.e-4
 warmup_steps: 100
 # Total epochs. This is just a reference number, as it is not linked on how many passes we have done in the dataset.
 # the 
 epochs: 60
 # Set train, val and test frequencies
-save_epochs: 15 # Await x epochs, then save.
+save_epochs: 10  # Await x epochs, then save.
 train_steps: 154  # 154  # Train for n minibatches. ~ 2000 / 13
 test_epochs: 5  # Await <test_epochs> epochs, then do a full test on entire validation set
 

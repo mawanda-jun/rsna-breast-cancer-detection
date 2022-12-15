@@ -24,7 +24,7 @@ def main(cfg_path: str):
         patient_ids_path=Path(args["train_dataset"]), 
         keep_num=args['keep_num'],
         smooth=args['smooth'],
-        transform=A.Compose(train_transforms + val_transforms)
+        transform=A.Compose(train_transforms)
     )
     
     val_set = RSNA_BCD_Dataset(
@@ -73,6 +73,6 @@ def main(cfg_path: str):
 
 if "__main__" in __name__:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--path", type=str, help="path/to/config.yaml", default="/projects/rsna-breast-cancer-detection/src/configs/eff4_allaug_sim.yaml")
+    parser.add_argument("--path", type=str, help="path/to/config.yaml", default="/projects/rsna-breast-cancer-detection/src/configs/eff4_simsoft_baseline_neg1.yaml")
     args = parser.parse_args()
     main(args.path)

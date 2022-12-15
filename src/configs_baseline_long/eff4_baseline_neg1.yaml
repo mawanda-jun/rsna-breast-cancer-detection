@@ -9,7 +9,7 @@ train_workers: 8
 val_workers: 4
 test_workers: 4
 img_size: 512
-smooth: True
+smooth: False
 
 # Augmentations
 augmentations:
@@ -46,9 +46,9 @@ augmentations:
 # - RandomToneCurve:
 #     scale: 0.1
 #     p: 0.5
-#     noise
-- HueSaturationValue:
-    p: 0.5
+    # noise
+# - HueSaturationValue:
+#     p: 0.1
 # - RandomGamma:
 #     p: 0.1
 # - CLAHE:
@@ -62,6 +62,10 @@ augmentations:
 #     p: 0.1
 # - PixelDropout:
 #     p: 0.1
+- Resize:
+    height: 512
+    width: 512
+    p: 1.
 
 
 # EXP TYPE
@@ -70,7 +74,7 @@ network:
 #       backbone: resnet50  # resnext101_32x8d, resnet50
 #       hidden_dim: 1024
 #       dropout: 0.
-- SimChiaEfficientNet:
+- ChiaEfficientNet:
     backbone: b4
     hidden_dim: 1024
     dropout: 0.1
@@ -91,7 +95,7 @@ lr: 1.e-4
 warmup_steps: 100
 # Total epochs. This is just a reference number, as it is not linked on how many passes we have done in the dataset.
 # the 
-epochs: 60
+epochs: 120
 # Set train, val and test frequencies
 save_epochs: 15 # Await x epochs, then save.
 train_steps: 154  # 154  # Train for n minibatches. ~ 2000 / 13

@@ -13,14 +13,18 @@ smooth: True
 
 # Augmentations
 augmentations:
-# geometric
-# - RandomResizedCrop:
+# - Resize: 
 #     height: 512
 #     width: 512
-#     scale: 
-#     - 0.1
-#     - 1.0
-#     p: 1
+#     p: 1.
+# geometric
+- RandomResizedCrop:
+    height: 512
+    width: 512
+    scale: 
+    - 0.1
+    - 1.0
+    p: 1
 - Flip:
     p: 0.5
 - ShiftScaleRotate:
@@ -34,8 +38,8 @@ augmentations:
 #     max_width: 8
 #     fill_value: 0
 #     p: 0.2
-- Perspective:
-    p: 0.5
+# - Perspective:
+#     p: 0.1
 # - ElasticTransform:
 #     p: 0.1
 # COLOR

@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
+from functools import partial
 from torchvision.models.resnet import resnet18, resnet50, resnext101_32x8d, ResNet18_Weights, ResNet50_Weights, ResNeXt101_32X8D_Weights
-from torchvision.models.efficientnet import efficientnet_b4, efficientnet_b2, EfficientNet_B4_Weights, EfficientNet_B2_Weights
+from torchvision.models.efficientnet import efficientnet_b0, efficientnet_b4, efficientnet_b2, EfficientNet_B4_Weights, EfficientNet_B2_Weights, EfficientNet_B0_Weights
 
 class ChiaBlock(torch.nn.Module):
     def __init__(self, module, stacked_axis=-1):
@@ -23,7 +24,7 @@ class ChiaBlock(torch.nn.Module):
         return x
 
 class SimChiaBlock(torch.nn.Module):
-    def __init__(self, module, stacked_axis=-1):
+    def __init__(self, module, act=None, stacked_axis=-1):
         """
 
         Args:
@@ -33,20 +34,34 @@ class SimChiaBlock(torch.nn.Module):
         super().__init__()
         self.module = module
         self.stacked_axis = stacked_axis
-        self.criterion = nn.CosineEmbeddingLoss()
+
+        criterion = nn.CosineEmbeddingLoss()
+        self.criterion = partial(criterion, **{'target': torch.tensor(1)})
+        self.act_fun = lambda x: x
+        if act == "sigmoid": 
+            self.criterion = nn.BCEWithLogitsLoss()
+        elif act == "softmax":
+            self.criterion = nn.CrossEntropyLoss()
+        elif act == 'relu':
+            self.act_fun = nn.ReLU()
+        elif act == 'mish':
+            self.act_fun = nn.Mish()
+        else:
+            raise NotImplementedError(f"{act} is not implemented yet!")
 
     def forward(self, x: torch.Tensor):
         # Invert batch axis with stacked axis
         x = torch.stack([self.module(x_i) for x_i in x.transpose(self.stacked_axis, 0)], self.stacked_axis)
-        x_0 = torch.flatten(x[:, 0, ...])
-        x_1 = torch.flatten(x[:, 1, ...])
-        x_2 = torch.flatten(x[:, 2, ...])
+        x_0 = self.act_fun(torch.flatten(x[:, 0, ...]))
+        x_1 = self.act_fun(torch.flatten(x[:, 1, ...]))
+        x_2 = self.act_fun(torch.flatten(x[:, 2, ...]))
 
         # Calculate similarity loss
-        loss_01 = self.criterion(x_0,x_1, torch.tensor(1, device=x_0.device))
-        loss_12 = self.criterion(x_1, x_2, torch.tensor(1, device=x_0.device))
-        loss_02 = self.criterion(x_0, x_2, torch.tensor(1, device=x_0.device))
+        loss_01 = self.criterion(x_0, x_1)
+        loss_12 = self.criterion(x_1, x_2)
+        loss_02 = self.criterion(x_0, x_2)
         loss = (loss_01 + loss_12 + loss_02) / 3
+        # loss = loss_01
 
         x = torch.mean(x, self.stacked_axis)
         # x = torch.logsumexp(x, self.axis) / x.size(self.axis)
@@ -99,8 +114,9 @@ class ChiaResNet(nn.Module):
 class ChiaEfficientNet(nn.Module):
     def __init__(self, backbone='b4', n_classes=1, hidden_dim=1024, freeze_weights=False, dropout=0.):
         super().__init__()
-
-        if backbone == "b2":
+        if backbone == 'b0':
+            model = efficientnet_b0(weights=EfficientNet_B0_Weights.IMAGENET1K_V1)
+        elif backbone == "b2":
             model = efficientnet_b2(weights=EfficientNet_B2_Weights.IMAGENET1K_V1)
         elif backbone == "b4":
             model = efficientnet_b4(weights=EfficientNet_B4_Weights.IMAGENET1K_V1)
@@ -133,10 +149,11 @@ class ChiaEfficientNet(nn.Module):
         return self.network(x), torch.zeros(1).to(x.device)
 
 class SimChiaEfficientNet(nn.Module):
-    def __init__(self, backbone='b4', n_classes=1, hidden_dim=1024, freeze_weights=False, dropout=0.):
+    def __init__(self, backbone='b4', n_classes=1, hidden_dim=1024, freeze_weights=False, dropout=0., act=None):
         super().__init__()
-
-        if backbone == "b2":
+        if backbone == 'b0':
+            model = efficientnet_b0(weights=EfficientNet_B0_Weights.IMAGENET1K_V1)
+        elif backbone == "b2":
             model = efficientnet_b2(weights=EfficientNet_B2_Weights.IMAGENET1K_V1)
         elif backbone == "b4":
             model = efficientnet_b4(weights=EfficientNet_B4_Weights.IMAGENET1K_V1)
@@ -151,7 +168,7 @@ class SimChiaEfficientNet(nn.Module):
             for param in self.enc.parameters():
                 param.requires_grad_(False)
         
-        self.backbone = SimChiaBlock(nn.Sequential(self.enc, nn.AdaptiveMaxPool2d(1), nn.Mish()), 1)
+        self.backbone = SimChiaBlock(nn.Sequential(self.enc, nn.AdaptiveMaxPool2d(1), nn.Mish()), act, 1)
         self.head = nn.Sequential(
             nn.Flatten(),
             # nn.BatchNorm1d(nc),
