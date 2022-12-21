@@ -3,6 +3,31 @@ import torch.nn as nn
 from functools import partial
 from torchvision.models.resnet import resnet18, resnet50, resnext101_32x8d, ResNet18_Weights, ResNet50_Weights, ResNeXt101_32X8D_Weights
 from torchvision.models.efficientnet import efficientnet_b0, efficientnet_b4, efficientnet_b2, EfficientNet_B4_Weights, EfficientNet_B2_Weights, EfficientNet_B0_Weights
+from torchvision.models.efficientnet import efficientnet_v2_s, efficientnet_v2_m, efficientnet_v2_l, EfficientNet_V2_S_Weights, EfficientNet_V2_M_Weights, EfficientNet_V2_L_Weights
+
+
+def eff_selection(model_type):
+    if model_type == 'b0':
+        model = efficientnet_b0(weights=EfficientNet_B0_Weights.IMAGENET1K_V1)
+    elif model_type == "b2":
+        model = efficientnet_b2(weights=EfficientNet_B2_Weights.IMAGENET1K_V1)
+    elif model_type == "b4":
+        model = efficientnet_b4(weights=EfficientNet_B4_Weights.IMAGENET1K_V1)
+    elif model_type == 'v2_s':
+        model = efficientnet_v2_s(weights=EfficientNet_V2_S_Weights.IMAGENET1K_V1)
+    elif model_type == 'v2_m':
+        model = efficientnet_v2_m(weights=EfficientNet_V2_M_Weights.IMAGENET1K_V1)
+    elif model_type == 'v2_l':
+        model = efficientnet_v2_l(weights=EfficientNet_V2_L_Weights.IMAGENET1K_V1)
+    else:
+        raise ValueError("Network type not implemented yet!")
+    return model
+
+class Windowing(nn.Module):
+    pass
+
+
+
 
 class ChiaBlock(torch.nn.Module):
     def __init__(self, module, stacked_axis=-1):
@@ -115,25 +140,17 @@ class ChiaResNet(nn.Module):
 class ChiaEfficientNet(nn.Module):
     def __init__(self, backbone='b4', n_classes=1, hidden_dim=1024, freeze_weights=False, dropout=0.):
         super().__init__()
-        if backbone == 'b0':
-            model = efficientnet_b0(weights=EfficientNet_B0_Weights.IMAGENET1K_V1)
-        elif backbone == "b2":
-            model = efficientnet_b2(weights=EfficientNet_B2_Weights.IMAGENET1K_V1)
-        elif backbone == "b4":
-            model = efficientnet_b4(weights=EfficientNet_B4_Weights.IMAGENET1K_V1)
-        else:
-            raise ValueError("Network type not implemented yet!")
-
+        model = eff_selection(backbone)
         # Define encoder
-        self.enc = nn.Sequential(*list(model.children())[:-2])
+        enc = nn.Sequential(*list(model.children())[:-2])
         # Find output dimensions
-        num_features = self.enc[-1][-1][0].out_channels
+        num_features = enc[-1][-1][0].out_channels
         if freeze_weights:
-            for param in self.enc.parameters():
+            for param in enc.parameters():
                 param.requires_grad_(False)
         
         self.network = nn.Sequential(
-            ChiaBlock(nn.Sequential(self.enc, nn.AdaptiveMaxPool2d(1), nn.Mish()), 1),
+            ChiaBlock(nn.Sequential(enc, nn.AdaptiveMaxPool2d(1), nn.Mish()), 1),
             # AdaptiveConcatPool2d(),
             # AdaptiveConcatPool2d(),
             # nn.AdaptiveMaxPool2d((1, 1)),
@@ -147,20 +164,12 @@ class ChiaEfficientNet(nn.Module):
         )
 
     def forward(self, x:torch.Tensor):
-        return self.network(x), torch.zeros(1).to(x.device)
+        return self.network(x), None
 
 class SimChiaEfficientNet(nn.Module):
     def __init__(self, backbone='b4', n_classes=1, hidden_dim=1024, freeze_weights=False, dropout=0., act=None):
         super().__init__()
-        if backbone == 'b0':
-            model = efficientnet_b0(weights=EfficientNet_B0_Weights.IMAGENET1K_V1)
-        elif backbone == "b2":
-            model = efficientnet_b2(weights=EfficientNet_B2_Weights.IMAGENET1K_V1)
-        elif backbone == "b4":
-            model = efficientnet_b4(weights=EfficientNet_B4_Weights.IMAGENET1K_V1)
-        else:
-            raise ValueError("Network type not implemented yet!")
-
+        model = eff_selection(backbone)
         # Define encoder
         self.enc = nn.Sequential(*list(model.children())[:-2])
         # Find output dimensions
