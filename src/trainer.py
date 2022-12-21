@@ -5,8 +5,12 @@ from torch.utils.data import DataLoader
 from dataset import RSNA_BCD_Dataset, TrainBatchSampler, ValBatchSampler, TestBatchSampler
 from model import RSNABCE
 import albumentations as A
+import torch
 
 def main(cfg_path: str):
+    torch.backends.cudnn.benchmark = True
+    # Speedup performance!
+
     # Import configuration
     with open(cfg_path, 'r') as file:
         args = yaml.safe_load(file)
@@ -73,6 +77,6 @@ def main(cfg_path: str):
 
 if "__main__" in __name__:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--path", type=str, help="path/to/config.yaml", default="/projects/rsna-breast-cancer-detection/src/configs_uint16/eff4_16_1024_smooth_neg5.yaml")
+    parser.add_argument("--path", type=str, help="path/to/config.yaml", default="/projects/rsna-breast-cancer-detection/src/configs_big_aug/effv2s_baseline.yaml")
     args = parser.parse_args()
     main(args.path)

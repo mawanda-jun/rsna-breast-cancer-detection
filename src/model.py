@@ -64,8 +64,8 @@ class RSNABCE(nn.Module):
         self.model: nn.Module = network.__dict__[network_name](**network_params)
         
         self.model.to(self.args["device"])
-        self.mean = (torch.tensor([0.485, 0.456, 0.406])*(2**self.args['color_space'] - 1)).to(self.args['device'])
-        self.std = (torch.tensor([0.229, 0.224, 0.225])*(2**self.args['color_space'] - 1)).to(self.args['device'])
+        self.mean = (torch.tensor([0.485, 0.456, 0.406])*(2**self.args['color_space'] - 1)).to(self.args['device']).to(torch.float16)
+        self.std = (torch.tensor([0.229, 0.224, 0.225])*(2**self.args['color_space'] - 1)).to(self.args['device']).to(torch.float16)
 
         self.criterion = nn.BCEWithLogitsLoss()
         self.optimizer, self.schedulers = load_optimizer(args, self.model)
@@ -123,7 +123,11 @@ class RSNABCE(nn.Module):
                 with autocast():
                     train_pred_logits, train_sim_loss = self.model(train_images)
                     train_cat_loss = self.criterion(train_pred_logits, train_classes)
-                    train_loss = train_cat_loss + train_sim_loss
+                    if train_sim_loss is not None:
+                        train_loss = train_cat_loss + train_sim_loss
+                    else:
+                        train_sim_loss = torch.zeros(1)
+                        train_loss = train_cat_loss
                     
                     # Accumulate gradient
                     train_loss = train_loss / self.args['gradient_acc_iters']
@@ -163,12 +167,6 @@ class RSNABCE(nn.Module):
 
             # Del resources from train so that we empty space
             train_progressbar.close()
-            del train_batch
-            del train_cat_loss
-            del train_sim_loss
-            del train_loss
-            del train_images
-            del train_classes
 
             # Update scheduler
             # self.schedulers['cosine_annealing'].step()
@@ -197,7 +195,11 @@ class RSNABCE(nn.Module):
                     val_pred_logits = self.model(val_images)
                     val_pred_logits, val_sim_loss = val_pred_logits
                     val_cat_loss = self.criterion(val_pred_logits, val_classes)
-                    val_loss = val_cat_loss + val_sim_loss
+                    if val_sim_loss is not None:
+                        val_loss = val_cat_loss + val_sim_loss
+                    else:
+                        val_sim_loss = torch.zeros(1)
+                        val_loss = val_cat_loss
 
                     # Remember predictions and targets
                     val_targets += val_classes.squeeze(-1).tolist()
@@ -233,18 +235,6 @@ class RSNABCE(nn.Module):
                 # "val_sim": total_val_sim_loss / (val_step + 1)
             }, num_images)
 
-    
-            # Del resources from train so that we empty space
-            del val_batch
-            del val_cat_loss
-            del val_sim_loss
-            del val_loss
-            del val_images
-            del val_classes
-            del val_targets
-            del val_predictions
-
-
             ########
             # TEST #
             ########
@@ -272,7 +262,11 @@ class RSNABCE(nn.Module):
                         test_pred_logits = self.model(test_images)
                         test_pred_logits, test_sim_loss = test_pred_logits
                         test_cat_loss = self.criterion(test_pred_logits, test_classes)
-                        test_loss = test_cat_loss + test_sim_loss
+                        if test_sim_loss is not None:                        
+                            test_loss = test_cat_loss + test_sim_loss
+                        else:
+                            test_loss = test_cat_loss
+                            test_sim_loss = torch.zeros(1)
                         
                         # Remember predictions and targets
                         test_targets += test_classes.cpu().squeeze(-1).tolist()
@@ -321,16 +315,6 @@ class RSNABCE(nn.Module):
                 self.writer.add_scalars(f"AtBeta/recall", recalls, num_images)
                 
                 print(f"Found best F1 of {test_pf1_score_1:.4f} at beta {test_beta_1:.2f}.")
-
-                # Del resources from train so that we empty space
-                del test_batch
-                del test_cat_loss
-                del test_sim_loss
-                del test_loss
-                del test_images
-                del test_classes
-                del test_targets
-                del test_predictions
 
             # Save if there is something to save
             if (epoch+1) % self.args["save_epochs"] == 0:
