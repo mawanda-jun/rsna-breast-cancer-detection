@@ -26,7 +26,7 @@ class RSNA_BCD_Dataset(Dataset):
             patient_ids_path: str,
             keep_num: int,
             transform = None,
-            smooth = False
+            smooth = 0
         ):
         super().__init__()
         self.dataset_path = dataset_path
@@ -51,7 +51,7 @@ class RSNA_BCD_Dataset(Dataset):
     def __getitem__(self, patient_id_laterality):
         img_ids, categories = self.patient_ids[patient_id_laterality]
         patient_id = patient_id_laterality.split("_")[0]
-        img_paths = [self.dataset_path / Path(str(patient_id)) / Path(f"{img_id}.tif") for img_id in img_ids]
+        img_paths = [self.dataset_path / Path(str(patient_id)) / Path(f"{img_id}.png") for img_id in img_ids]
         random.shuffle(img_paths)  # So that, in case there are more then 3, we select always different images.
         # # Keep always <keep_num> images. If there are less, repeat present images
         while len(img_paths) < self.keep_num:
@@ -60,7 +60,7 @@ class RSNA_BCD_Dataset(Dataset):
         if len(img_paths) > self.keep_num:
             img_paths = img_paths[:self.keep_num]
 
-        imgs = [self.__gray_to_rgb(np.asarray(Image.open(img_path))) for img_path in img_paths]
+        imgs = [self.__gray_to_rgb(np.array(Image.open(img_path))) for img_path in img_paths]
         # # Keep always <keep_num> images. If there are less, add an empty image
         # while len(imgs) < self.keep_num:
         #     imgs.append(np.zeros_like(imgs[0]))
@@ -69,16 +69,15 @@ class RSNA_BCD_Dataset(Dataset):
 
         # Apply transform
         if self.transform is not None:
-            imgs = np.array([self.transform(image=img)['image'] for img in imgs])
+            imgs = np.stack([self.transform(image=img)['image'] for img in imgs], 0)
         
         # Every item in patient_id/laterality has the same category!
         label = categories[0]
-        
-        if self.smooth:
-            if label == 1:
-                label = random.uniform(0.85, 1)
-            else:
-                label = random.uniform(0, 0.15)
+
+        # Apply smooth labeling. If self.smooth is 0, then no smoothing is applied.
+        # Otherwise, it is applied. self.smoot == 0.3 -> label in [0.85, 1], label.mean ~= 0.925
+        new_label = label * (1.0 - self.smooth) + 0.5 * self.smooth
+        label = random.uniform(new_label, label)
 
         return imgs, label  
 
@@ -180,26 +179,58 @@ class TestBatchSampler(BatchSampler):
         super().__init__(sampler=list(dataset.patient_ids.keys()), batch_size=batch_size, drop_last=False)
 
 
-if "__main__" in __name__:
-    transform = Compose([Resize(512, 512, p=1)])
+def visualize_augs(augs_path):
+    import albumentations as A
+
+    with open(augs_path, 'r') as reader:
+            augs = yaml.load(reader, Loader=CSafeLoader)
+    
+    transforms = A.Compose([
+            A.__dict__[list(aug.keys())[0]](**list(aug.values())[0]) 
+            for aug in augs['augmentations']
+        ])
     dataset = RSNA_BCD_Dataset(
         dataset_path = Path("/data/rsna-breast-cancer-detection/train_images_png"),
-        patient_ids_path = Path("/projects/rsna-breast-cancer-detection/src/configs/train_ids.yaml"),
-        keep_num=2,
-        transform=transform
+        patient_ids_path = Path("/projects/rsna-breast-cancer-detection/src/dataset_info/val_ids.yaml"),
+        keep_num=1,
+        transform=transforms
     )
-    batch_size = 40
-    dataloader = DataLoader(
-        batch_sampler=TrainBatchSampler(dataset, batch_size),
-        dataset=dataset,
-        collate_fn=dataset.collate_fn,
-        num_workers=6,
-        pin_memory=True
-    )
+    imgs = []
+    edge = 10
+    for _ in range(edge**2):
+        patient_id = random.choice(list(dataset.patient_ids.keys()))
+        img, label = dataset[patient_id]
+        imgs.append(img[0])
+    cols = []
+    for i in range(edge):
+        cols.append(np.concatenate(imgs[edge*i:edge*(i+1)], 1))
+    imgs = np.concatenate(cols, 0)
 
-    for i, data in enumerate(dataloader):
-        print(i, data[0].shape, data[1].shape)
+    # imgs = (imgs * 2**(8-16)).astype(np.uint8)
+    Image.fromarray(imgs).save("deleteme.png")
 
+
+if "__main__" in __name__:
+    # transform = Compose([Resize(512, 512, p=1)])
+    # dataset = RSNA_BCD_Dataset(
+    #     dataset_path = Path("/data/rsna-breast-cancer-detection/train_images_png"),
+    #     patient_ids_path = Path("/projects/rsna-breast-cancer-detection/src/configs/train_ids.yaml"),
+    #     keep_num=2,
+    #     transform=transform
+    # )
+    # batch_size = 40
+    # dataloader = DataLoader(
+    #     batch_sampler=TrainBatchSampler(dataset, batch_size),
+    #     dataset=dataset,
+    #     collate_fn=dataset.collate_fn,
+    #     num_workers=6,
+    #     pin_memory=True
+    # )
+
+    # for i, data in enumerate(dataloader):
+    #     print(i, data[0].shape, data[1].shape)
+    augs_path = "/projects/rsna-breast-cancer-detection/src/test_augs.yaml"
+    visualize_augs(augs_path)
         
 
         
