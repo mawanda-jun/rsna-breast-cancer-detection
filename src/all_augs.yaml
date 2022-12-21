@@ -1,0 +1,61 @@
+# Augmentations
+augmentations:
+
+# - CoarseDropout:
+#     max_holes: 16
+#     max_height: 24
+#     max_width: 24
+#     fill_value: 255
+#     p: 0.2
+# # GEOMETRIC
+# - RandomResizedCrop:
+#     height: 2048
+#     width: 2048
+#     scale: 
+#     - 0.4
+#     - 1.0
+#     p: 0.5
+# - Flip:
+#     p: 0.5
+# - ShiftScaleRotate:
+#     shift_limit: 0.5
+#     scale_limit: 0.5
+#     rotate_limit: 180
+#     p: .5
+# - Perspective:  # Non fa tanto
+#     p: .5
+# - ElasticTransform:  # non fa tanto ed e' pesantissima
+#     p: 0.5
+- Resize:
+    height: 512
+    width: 512
+    p: 1
+# COLOR
+# - ToFloat:
+#     max_value: 65535.0
+# - RandomBrightnessContrast:
+#     brightness_limit: 0.05  # aumenta anche il fondo, poco interessante!
+#     contrast_limit: 0.7  # Aumenta o diminuisce il contrasto, interessante per rendere piu' difficile l'identificazione
+#     p: 0.5
+# - RandomToneCurve:
+#     scale: .5
+#     p: 0.5
+    # noise
+# - HueSaturationValue:  # Change in color, might be interesting
+    # p: 0.2
+# - RandomGamma:  # Nothing visible
+#     p: 0.5
+# - CLAHE:  # Contrast greatily changes!
+#     clip_limit: 4
+#     p: 0.5
+# - GaussianBlur:  # Might break low-detail features
+#     p: 0.2
+# - ImageCompression:  # Might break low-detail features
+#     p: 0.2
+# - ISONoise:  # Important augmentation for adding (good) noise
+#     p: 0.2
+# - PixelDropout:  # Must see if it's working: white pixels on the white part is not great!
+#     drop_value: 255 
+#     p: 0.2
+# - FromFloat:
+#     max_value: 65535.0
