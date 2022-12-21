@@ -3,8 +3,8 @@ import numpy as np
 
 def pfbeta(labels, predictions, beta):
     y_true_count = 0
-    ctp = 0
-    cfp = 0
+    ctp = 1e-8
+    cfp = 1e-8
 
     for idx in range(len(labels)):
         prediction = min(max(predictions[idx], 0), 1)
@@ -38,7 +38,7 @@ def precision_recall(labels: np.ndarray, predictions: np.ndarray):
     tn = np.logical_not(np.logical_or(predictions, labels)).sum()  # NOR between predictions and labels so we take only those elements in which both are 0
     fn = np.logical_not(predictions).sum() - tn
 
-    precision = tp / (tp + fp)
-    recall = tp / (tp + fn)
+    precision = tp / (tp + fp + 1e-8)
+    recall = tp / (tp + fn + 1e-8)
 
     return precision, recall
