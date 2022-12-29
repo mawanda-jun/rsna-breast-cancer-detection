@@ -9,7 +9,7 @@ train_workers: 8
 val_workers: 4
 test_workers: 4
 img_size: 1024
-smooth: True
+smooth: False
 
 # Augmentations
 augmentations:
@@ -56,7 +56,7 @@ lr: 1.e-4
 warmup_steps: 100
 # Total epochs. This is just a reference number, as it is not linked on how many passes we have done in the dataset.
 # the 
-epochs: 60
+epochs: 30
 # Set train, val and test frequencies
 save_epochs: 10  # Await x epochs, then save.
 train_steps: 154  # 154  # Train for n minibatches. ~ 2000 / 13

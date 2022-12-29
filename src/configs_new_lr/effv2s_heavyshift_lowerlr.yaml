@@ -9,7 +9,7 @@ train_workers: 8
 val_workers: 4
 test_workers: 4
 img_size: 1024
-smooth: True
+smooth: False
 
 # Augmentations
 augmentations:
@@ -46,20 +46,20 @@ network:
 # wanted train images per epoch: ~2000
 # wanted val images per epoch: 20% of train images -> 500
 batch_size: 4  # 13
-gradient_acc_iters: 4
+gradient_acc_iters: 30  # 4
 # Optimizer options
 weight_decay: 1.e-6
 momentum: 0.9
 eps: 1.e-8
 device: cuda:0
-lr: 1.e-4
+lr: 8.e-5
 warmup_steps: 100
 # Total epochs. This is just a reference number, as it is not linked on how many passes we have done in the dataset.
 # the 
 epochs: 60
 # Set train, val and test frequencies
 save_epochs: 10  # Await x epochs, then save.
-train_steps: 154  # 154  # Train for n minibatches. ~ 2000 / 13
+train_steps: 25  # 154  # Train for n minibatches. ~ 2000 / 13
 test_epochs: 5  # Await <test_epochs> epochs, then do a full test on entire validation set
 
 # Checkpoint option

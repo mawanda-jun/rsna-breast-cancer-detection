@@ -1,9 +1,11 @@
 import torch
 import torch.nn as nn
 from functools import partial
+import torch.nn.functional as F
 from torchvision.models.resnet import resnet18, resnet50, resnext101_32x8d, ResNet18_Weights, ResNet50_Weights, ResNeXt101_32X8D_Weights
 from torchvision.models.efficientnet import efficientnet_b0, efficientnet_b4, efficientnet_b2, EfficientNet_B4_Weights, EfficientNet_B2_Weights, EfficientNet_B0_Weights
 from torchvision.models.efficientnet import efficientnet_v2_s, efficientnet_v2_m, efficientnet_v2_l, EfficientNet_V2_S_Weights, EfficientNet_V2_M_Weights, EfficientNet_V2_L_Weights
+from itertools import combinations
 
 
 def eff_selection(model_type):
@@ -21,12 +23,10 @@ def eff_selection(model_type):
         model = efficientnet_v2_l(weights=EfficientNet_V2_L_Weights.IMAGENET1K_V1)
     else:
         raise ValueError("Network type not implemented yet!")
-    return model
 
-class Windowing(nn.Module):
-    pass
-
-
+    enc = list(model.children())[:-2][0]
+    num_features = enc[-1][0].out_channels
+    return enc, num_features
 
 
 class ChiaBlock(torch.nn.Module):
@@ -43,13 +43,17 @@ class ChiaBlock(torch.nn.Module):
 
     def forward(self, x: torch.Tensor):
         # Invert batch axis with stacked axis
-        x = torch.stack([self.module(x_i) for x_i in x.transpose(self.stacked_axis, 0)], self.stacked_axis)
-        x = torch.mean(x, self.stacked_axis)
+        B, V, C, H, W = x.shape
+        x = x.reshape((B*V, C, H, W))
+        feats = self.module(x)
+        feats = feats.reshape((B, V, -1))
+        # x = torch.stack([self.module(x_i) for x_i in x.transpose(self.stacked_axis, 0)], self.stacked_axis)
+        feats = torch.mean(feats, self.stacked_axis)
         # x = torch.logsumexp(x, self.axis) / x.size(self.axis)
-        return x
+        return feats
 
 class SimChiaBlock(torch.nn.Module):
-    def __init__(self, module, act=None, stacked_axis=-1):
+    def __init__(self, module, hidden_dim, proj_dim = 1280, feat_dim=1280):
         """
 
         Args:
@@ -58,56 +62,41 @@ class SimChiaBlock(torch.nn.Module):
         """
         super().__init__()
         self.module = module
-        self.stacked_axis = stacked_axis
-
-        criterion = nn.CosineEmbeddingLoss()
-        self.criterion = partial(criterion, **{'target': torch.tensor(1)})
-        self.act_fun = lambda x: x
-        if act == "sigmoid": 
-            self.criterion = nn.BCEWithLogitsLoss()
-        elif act == "softmax":
-            self.act_fun = nn.Softmax(dim=0)
-            self.criterion = nn.CrossEntropyLoss()
-        elif act == 'relu':
-            self.act_fun = nn.ReLU()
-        elif act == 'mish':
-            self.act_fun = nn.Mish()
-        else:
-            raise NotImplementedError(f"{act} is not implemented yet!")
+        self.projection = nn.Linear(feat_dim, proj_dim)
+        self.fc = nn.Linear(feat_dim, hidden_dim)
+        self.criterion = nn.CosineEmbeddingLoss()
 
     def forward(self, x: torch.Tensor):
-        # Invert batch axis with stacked axis
-        x = torch.stack([self.module(x_i) for x_i in x.transpose(self.stacked_axis, 0)], self.stacked_axis)
-        x_0 = self.act_fun(torch.flatten(x[:, 0, ...]))
-        x_1 = self.act_fun(torch.flatten(x[:, 1, ...]))
-        x_2 = self.act_fun(torch.flatten(x[:, 2, ...]))
+        B, V, C, H, W = x.shape
+        x = x.reshape((B*V, C, H, W))
+        feats = self.module(x)
+        feats = feats.reshape((B, V, -1))
+        
+        # Calculate output
+        outputs = torch.stack([self.fc(feat) for feat in feats.transpose(1, 0)], 1)
+        outputs = F.mish(torch.mean(outputs, 1))
 
-        # Calculated loss
-        loss_01 = self.criterion(x_0, x_1)
-        loss_12 = self.criterion(x_1, x_2)
-        loss_02 = self.criterion(x_0, x_2)
-        loss = (loss_01 + loss_12 + loss_02) / 3
-        # loss = loss_01
+        # Calculate losses
+        projections = [self.projection(x) for x in feats.transpose(1, 0)]
 
-        x = torch.mean(x, self.stacked_axis)
-        # x = torch.logsumexp(x, self.axis) / x.size(self.axis)
-        return x, loss
+        losses = torch.stack([self.criterion(torch.flatten(x1), torch.flatten(x2), torch.tensor(1).to(x1.device)) for x1, x2 in combinations(projections, 2)], 0)
+        loss = torch.mean(losses)
+
+        return outputs, loss
 
 class ChiaResNet(nn.Module):
     def __init__(self, backbone='resnext101_32x8d', n_classes=1, hidden_dim=1024, freeze_weights=False, dropout=0.):
         super().__init__()
 
         if backbone == "resnet50":
-            model = resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
+            self.enc = resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
         elif backbone == "resnext101_32x8d":
-            model = resnext101_32x8d(weights=ResNeXt101_32X8D_Weights.IMAGENET1K_V2)
+            self.enc = resnext101_32x8d(weights=ResNeXt101_32X8D_Weights.IMAGENET1K_V2)
         elif backbone == "resnet18":
-            model = resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
+            self.enc = resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
         else:
             raise ValueError("Network type not implemented yet!")
 
-        # Define encoder
-        self.enc = nn.Sequential(*list(model.children())[:-2])
         # Find output dimensions
         bottleneck = list(self.enc.children())[-1][-1]
         try:
@@ -140,11 +129,7 @@ class ChiaResNet(nn.Module):
 class ChiaEfficientNet(nn.Module):
     def __init__(self, backbone='b4', n_classes=1, hidden_dim=1024, freeze_weights=False, dropout=0.):
         super().__init__()
-        model = eff_selection(backbone)
-        # Define encoder
-        enc = nn.Sequential(*list(model.children())[:-2])
-        # Find output dimensions
-        num_features = enc[-1][-1][0].out_channels
+        enc, num_features = eff_selection(backbone)
         if freeze_weights:
             for param in enc.parameters():
                 param.requires_grad_(False)
@@ -169,32 +154,22 @@ class ChiaEfficientNet(nn.Module):
 class SimChiaEfficientNet(nn.Module):
     def __init__(self, backbone='b4', n_classes=1, hidden_dim=1024, freeze_weights=False, dropout=0., act=None):
         super().__init__()
-        model = eff_selection(backbone)
-        # Define encoder
-        self.enc = nn.Sequential(*list(model.children())[:-2])
-        # Find output dimensions
-        num_features = self.enc[-1][-1][0].out_channels
-        if freeze_weights:
-            for param in self.enc.parameters():
-                param.requires_grad_(False)
+        model, num_features = eff_selection(backbone)
         
-        self.backbone = SimChiaBlock(nn.Sequential(self.enc, nn.AdaptiveMaxPool2d(1), nn.Mish()), act, 1)
-        self.head = nn.Sequential(
-            nn.Flatten(),
-            # nn.BatchNorm1d(nc),
-            nn.Linear(num_features, hidden_dim),
-            nn.Dropout(dropout),
-            nn.Mish(),
-            nn.Linear(hidden_dim, n_classes)
-        )
+        encoder = nn.Sequential(model, nn.AdaptiveAvgPool2d(1), nn.Mish())
+        self.dropout = dropout
+
+        self.backbone = SimChiaBlock(encoder, hidden_dim=hidden_dim, proj_dim=num_features, feat_dim=num_features)
+        
+        self.cancer = nn.Linear(hidden_dim, n_classes)
 
     def forward(self, x):
         features, loss = self.backbone(x)
-        return self.head(features), loss
+        return self.cancer(F.dropout(features, self.dropout)), loss * 0.1
 
 
 if "__main__" in __name__:
     input = torch.zeros((2, 4, 3, 512, 512))
-    model = SimChiaEfficientNet()
-    model.__repr__
+    model = ChiaEfficientNet('v2_s')
+    print(model.__repr__)
     logits, simloss = model(input)

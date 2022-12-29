@@ -53,12 +53,13 @@ class RSNA_BCD_Dataset(Dataset):
         patient_id = patient_id_laterality.split("_")[0]
         img_paths = [self.dataset_path / Path(str(patient_id)) / Path(f"{img_id}.png") for img_id in img_ids]
         random.shuffle(img_paths)  # So that, in case there are more then 3, we select always different images.
-        # # Keep always <keep_num> images. If there are less, repeat present images
-        while len(img_paths) < self.keep_num:
-            img_paths += img_paths
-        
-        if len(img_paths) > self.keep_num:
-            img_paths = img_paths[:self.keep_num]
+        # Keep always <keep_num> images. If there are less, repeat present images
+        if self.keep_num is not None:
+            while len(img_paths) < self.keep_num:
+                img_paths += img_paths
+            
+            if len(img_paths) > self.keep_num:
+                img_paths = img_paths[:self.keep_num]
 
         imgs = [self.__gray_to_rgb(np.array(Image.open(img_path))) for img_path in img_paths]
         # # Keep always <keep_num> images. If there are less, add an empty image

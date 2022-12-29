@@ -111,6 +111,7 @@ if "__main__" in __name__:
     # img_path = Path("/data/rsna-breast-cancer-detection/train_images/5325/324732883.dcm")
     # Image.fromarray(read_xray(img_path)).save("img.png")
     # Image.fromarray(crop_roi_from_image(read_xray(img_path))).save("roi_only.png")
-    dataset_path = Path("/original_dataset/")
+    # dataset_path = Path("/original_dataset/")
+    dataset_path = Path("/data/rsna-breast-cancer-detection/test_images")
     output_path = Path("/data/rsna-breast-cancer-detection/deleteme")
     convert_dataset(dataset_path, output_path)

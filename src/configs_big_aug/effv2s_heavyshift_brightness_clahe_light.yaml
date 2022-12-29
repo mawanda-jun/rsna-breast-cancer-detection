@@ -9,24 +9,28 @@ train_workers: 8
 val_workers: 4
 test_workers: 4
 img_size: 1024
-smooth: True
+smooth: False
 
 # Augmentations
 augmentations:
-# From baseline
 - Flip:
     p: 0.5
-
 - ShiftScaleRotate:
     shift_limit: 0.5
     scale_limit: 0.5
     rotate_limit: 180
     p: .5
-    
 - Resize:
     height: 1024
     width: 1024
     p: 1
+- CLAHE:  # Contrast greatily changes!
+    clip_limit: 4
+    p: 0.2
+- RandomBrightnessContrast:
+    brightness_limit: 0.05  # aumenta anche il fondo, poco interessante!
+    contrast_limit: 0.7  # Aumenta o diminuisce il contrasto, interessante per rendere piu' difficile l'identificazione
+    p: 0.2
 
 
 # EXP TYPE

@@ -17,9 +17,7 @@
 # effv2s_clahe.yaml 
 # effv2s_coarsedropout.yaml "
 
-names="effv2s_heavyshift_brightness_clahe.yaml 
-effv2s_smooth_heavyshift_brightness_clahe.yaml "
-
+names="effv2s_sim_heavyshift.yaml "
 for config in $names
 do
 
@@ -33,6 +31,6 @@ do
         --name RSNA-BCD-trainer \
         mawanda/misc:Pillar \
         python /projects/rsna-breast-cancer-detection/src/trainer.py \
-            --path /projects/rsna-breast-cancer-detection/src/configs_big_aug/$config
+            --path /projects/rsna-breast-cancer-detection/src/configs_new_lr/$config
 
 done

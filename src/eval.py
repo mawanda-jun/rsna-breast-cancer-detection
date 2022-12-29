@@ -10,8 +10,12 @@ import albumentations as A
 from tqdm import tqdm
 from metrics import best_pfbeta, precision_recall, pfbeta
 import numpy as np
+from torchmetrics.classification import BinaryAUROC
+from torch.utils.tensorboard import SummaryWriter
 
-def main(cfg_path: Path, weights_path: Path, device: str):
+
+def main(cfg_path: Path, weights_path: Path, summary: SummaryWriter, device: str):
+    metric = BinaryAUROC()
     print(f"Evaluating weight: {str(weights_path.name).split('.')[0].split('_')[1]}")
     # Import configuration
     with open(cfg_path, 'r') as file:
@@ -23,15 +27,15 @@ def main(cfg_path: Path, weights_path: Path, device: str):
     dataset = RSNA_BCD_Dataset(
         dataset_path=Path(args["dataset_path"]), 
         patient_ids_path=Path(args["val_dataset"]), 
-        keep_num=args['keep_num'],
+        keep_num=None,
         transform=A.Compose(transforms)
     )
-    
+
     loader = DataLoader(
         dataset=dataset,
-        batch_sampler=TestBatchSampler(dataset, args['batch_size']),
+        batch_sampler=TestBatchSampler(dataset, 1),
         collate_fn=dataset.collate_fn,
-        num_workers=args['test_workers'],
+        num_workers=16,
         pin_memory=True
     )
 
@@ -52,6 +56,7 @@ def main(cfg_path: Path, weights_path: Path, device: str):
     targets = []
     model.eval()
 
+    i = 0
     for batch in tqdm(loader):
         # Put model in eval mode
         # Fetch data
@@ -70,23 +75,34 @@ def main(cfg_path: Path, weights_path: Path, device: str):
                 pred_logits, _ = pred_logits
 
         # Remember predictions and targets
-        targets += test_classes.squeeze().tolist()
-        predictions += torch.sigmoid(pred_logits).cpu().squeeze().tolist()
+        targets.append(test_classes.cpu().squeeze().item())
+        predictions.append(torch.sigmoid(pred_logits).cpu().squeeze().item())
 
-    targets = np.asarray(targets)
-    predictions = np.asarray(predictions)
+    targets = torch.tensor(targets)
+    predictions = torch.tensor(predictions)
 
-    beta, pF1 = best_pfbeta(targets, predictions)
+    auc = metric(predictions, targets)
 
-    print(f"Beta {beta:.4f} is best for pF1: {pF1:.4f}")
+    # Add metric to writer
+    num_images = int(str(weight_path.name).split(".")[0].split("_")[1])
+    summary.add_scalar("Metrics/AUC", auc, num_images)
+    summary.flush()
 
-    with open(cfg_path.parent / Path(f"ckp_{str(weights_path.name).split('.')[0].split('_')[1]}_{beta:.4f}_{pF1:.4f}.txt"), 'w') as writer:
-        writer.write(f"{beta} {pF1}")
+    print(f"AUC: {auc:.4f}")
 
 if "__main__" in __name__:
-    test_path = Path("/data/rsna-breast-cancer-detection/exp/EffB4_allaug_sim_long_INTERR/config.yaml")
-    weights = list(test_path.parent.glob("*.tar"))
-    weights = sorted(weights, reverse=True, key=lambda x: int(str(x.name).split('.')[0].split('_')[1]))
-    device = 'cuda'
-    for weight_path in weights:
-        main(test_path, weight_path, device)
+    test_paths = [
+        "/data/rsna-breast-cancer-detection/exp/effv2s_heavyshift_brightness_clahe_light_newlr",
+        "/data/rsna-breast-cancer-detection/exp/effv2s_heavyshift_brightness_clahe_light_smooth_newlr",
+        "/data/rsna-breast-cancer-detection/exp/effv2s_heavyshift_newlr",
+        "/data/rsna-breast-cancer-detection/exp/effv2s_heavyshift_smooth_newlr"
+    ]
+    for test_path in test_paths:
+        test_path = Path(test_path)
+        summary = SummaryWriter(test_path / Path("log_dir"))
+
+        weights = list(test_path.glob("*.tar"))
+        weights = sorted(weights, key=lambda x: int(str(x.name).split('.')[0].split('_')[1]))
+        device = 'cuda'
+        for weight_path in weights:
+            main(test_path / Path("config.yaml"), weight_path, summary, device)
