@@ -122,14 +122,26 @@ class TrainBatchSampler(Sampler):
 
     def generate_batch(self):
         # Make a balanced loader!
+        positives = np.arange(len(self.positives))
+        pos_avail = np.ones(len(self.positives), dtype=np.bool)
+        negatives = np.arange(len(self.negatives))
+        neg_avail = np.ones(len(self.negatives), dtype=np.bool)
         while True:
             batch = []
             for _ in range(self.batch_size):
                 if random.random() > self.neg_percent:
+                    if pos_avail.sum() == 0:  # Reset indexes since they are exausted!
+                        pos_avail = np.ones(len(self.positives), dtype=np.bool)
                     # Select positive index
-                    batch.append(random.choice(self.positives))
+                    pos = np.random.choice(positives[pos_avail], replace=False)
+                    pos_avail[pos] = False
+                    batch.append(self.positives[pos])
                 else:
-                    batch.append(random.choice(self.negatives))
+                    if neg_avail.sum() == 0:  # Reset indexes since they are exausted!
+                        neg_avail = np.ones(len(self.negatives), dtype=np.bool)
+                    neg = np.random.choice(negatives[neg_avail], replace=False)
+                    neg_avail[neg] = False
+                    batch.append(self.negatives[pos])
             yield batch
 
     def __iter__(self):
@@ -197,9 +209,9 @@ def visualize_augs(augs_path):
         transform=transforms
     )
     imgs = []
-    edge = 10
-    for _ in range(edge**2):
-        patient_id = random.choice(list(dataset.patient_ids.keys()))
+    edge = 5
+    for i in range(edge**2):
+        patient_id = list(dataset.patient_ids.keys())[i]
         img, label = dataset[patient_id]
         imgs.append(img[0])
     cols = []
@@ -212,26 +224,27 @@ def visualize_augs(augs_path):
 
 
 if "__main__" in __name__:
-    # transform = Compose([Resize(512, 512, p=1)])
-    # dataset = RSNA_BCD_Dataset(
-    #     dataset_path = Path("/data/rsna-breast-cancer-detection/train_images_png"),
-    #     patient_ids_path = Path("/projects/rsna-breast-cancer-detection/src/configs/train_ids.yaml"),
-    #     keep_num=2,
-    #     transform=transform
-    # )
-    # batch_size = 40
-    # dataloader = DataLoader(
-    #     batch_sampler=TrainBatchSampler(dataset, batch_size),
-    #     dataset=dataset,
-    #     collate_fn=dataset.collate_fn,
-    #     num_workers=6,
-    #     pin_memory=True
-    # )
+    transform = Compose([Resize(1024, 1024, p=1)])
+    dataset = RSNA_BCD_Dataset(
+        dataset_path=Path("/data/rsna-breast-cancer-detection/train_images_png"), 
+        patient_ids_path=Path("/projects/rsna-breast-cancer-detection/src/dataset_info/train_ids.yaml"), 
+        keep_num=3,
+        smooth=0.05,
+        transform=transform
+    )
+    batch_size = 20
+    dataloader = DataLoader(
+        dataset=dataset,
+        batch_sampler=TrainBatchSampler(dataset, batch_size, 0.5),
+        collate_fn=dataset.collate_fn,
+        num_workers=1,
+        pin_memory=True
+    )
 
-    # for i, data in enumerate(dataloader):
-    #     print(i, data[0].shape, data[1].shape)
-    augs_path = "/projects/rsna-breast-cancer-detection/src/test_augs.yaml"
-    visualize_augs(augs_path)
+    for i, data in enumerate(dataloader):
+        print(i, data[0].shape, data[1].shape)
+    # augs_path = "/projects/rsna-breast-cancer-detection/src/all_augs.yaml"
+    # visualize_augs(augs_path)
         
 
         
