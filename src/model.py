@@ -22,7 +22,7 @@ class RSNABCE(nn.Module):
         self.mean = (torch.tensor([0.485, 0.456, 0.406])*(2**self.args['color_space'] - 1)).to(self.args['device']).to(torch.float16)
         self.std = (torch.tensor([0.229, 0.224, 0.225])*(2**self.args['color_space'] - 1)).to(self.args['device']).to(torch.float16)
 
-        self.criterion = nn.BCEWithLogitsLoss()
+        self.criterion = nn.BCEWithLogitsLoss(pos_weight=self.args['pos_weight'] if 'pos_weight' in self.args.keys() else None)
         self.metric = BinaryAUROC()
 
         self.writer = SummaryWriter(log_dir=Path(args["exp_path"]) / Path("log_dir"))
@@ -310,6 +310,7 @@ class RSNABCE(nn.Module):
         lrs = []
         losses = []
         
+        writer = open('lrfinder.txt', 'w')
         # Make train_loader as iterators, so it's possible to iterate over them indefinitely
         train_iter = iter(train_loader)
         scaler = GradScaler()
@@ -327,7 +328,7 @@ class RSNABCE(nn.Module):
 
             # Actual training
             total_train_loss = 0.
-            accum_steps = 30
+            accum_steps = self.args['gradient_acc_iters']
             for _ in range(accum_steps):
                 # Fetch data
                 train_batch = next(train_iter)
@@ -389,6 +390,10 @@ class RSNABCE(nn.Module):
             lrs.append(lr)
             losses.append(total_val_loss / len(val_loader))
 
+            # Write it to disk
+            writer.write(f"{total_val_loss / len(val_loader)} {lr}\n")
+            writer.flush()
+
             # Reset model and optimizers
             self.__init_model()
             self.__init_optim()
@@ -398,9 +403,7 @@ class RSNABCE(nn.Module):
             scheduler.step()
 
         
-        with open('lrfinder.txt', 'w') as writer:
-            for loss, lr in zip(losses, lrs):
-                writer.write(f"{loss} {lr}\n")
+        writer.close()
 
         import matplotlib.pyplot as plt
         plt.plot(lrs, losses)
