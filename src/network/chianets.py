@@ -84,6 +84,31 @@ class SimChiaBlock(torch.nn.Module):
 
         return outputs, loss
 
+class NewChiaBlock(torch.nn.Module):
+    def __init__(self, module, hidden_dim, proj_dim = 1280, feat_dim=1280):
+        """
+
+        Args:
+            module (_type_): _description_
+            stacked_axis (int, optional): Axis where images from same patient are stacked.
+        """
+        super().__init__()
+        self.module = module
+        self.fc = nn.Linear(feat_dim, hidden_dim)
+        self.criterion = nn.CosineEmbeddingLoss()
+
+    def forward(self, x: torch.Tensor):
+        B, V, C, H, W = x.shape
+        x = x.reshape((B*V, C, H, W))
+        feats = self.module(x)
+        feats = feats.reshape((B, V, -1))
+        
+        # Calculate output
+        outputs = torch.stack([self.fc(feat) for feat in feats.transpose(1, 0)], 1)
+        outputs = F.mish(torch.mean(outputs, 1))
+
+        return outputs
+
 class ChiaResNet(nn.Module):
     def __init__(self, backbone='resnext101_32x8d', n_classes=1, hidden_dim=1024, freeze_weights=False, dropout=0.):
         super().__init__()
@@ -152,6 +177,43 @@ class ChiaEfficientNet(nn.Module):
         return self.network(x), None
 
 class SimChiaEfficientNet(nn.Module):
+    def __init__(self, backbone='b4', n_classes=1, hidden_dim=1024, proj_dim=None, dropout=0.):
+        super().__init__()
+        model, num_features = eff_selection(backbone)
+        if proj_dim is None:
+            proj_dim = num_features
+        
+        self.encoder = nn.Sequential(model, nn.AdaptiveAvgPool2d(1), nn.Mish())
+
+        self.projection = nn.Linear(num_features, proj_dim)
+        self.fc = nn.Linear(num_features, hidden_dim)
+        self.cancer = nn.Linear(hidden_dim, n_classes)
+        
+        self.criterion = nn.CosineEmbeddingLoss()
+        self.dropout_rate = dropout
+        
+    def forward(self, x: torch.Tensor):
+        B, V, C, H, W = x.shape
+        x = x.reshape((B*V, C, H, W))
+        feats: torch.Tensor = self.encoder(x)
+        feats = feats.reshape((B, V, -1))
+        
+        # Calculate output
+        outputs = torch.stack([self.fc(feat) for feat in feats.transpose(1, 0)], 1)
+        outputs = torch.mean(outputs, 1)
+        outputs = F.dropout(outputs, self.dropout_rate)
+        outputs = F.mish(outputs)
+        outputs = self.cancer(outputs)
+
+        # Calculate losses
+        projections = [self.projection(feat) for feat in feats.transpose(1, 0)]
+
+        losses = torch.stack([self.criterion(torch.flatten(x1), torch.flatten(x2), torch.tensor(1).to(x1.device)) for x1, x2 in combinations(projections, 2)], 0)
+        loss = torch.mean(losses)
+
+        return outputs, loss * 0.1
+
+class NewChiaEfficientNet(nn.Module):
     def __init__(self, backbone='b4', n_classes=1, hidden_dim=1024, freeze_weights=False, dropout=0., act=None):
         super().__init__()
         model, num_features = eff_selection(backbone)
@@ -159,13 +221,13 @@ class SimChiaEfficientNet(nn.Module):
         encoder = nn.Sequential(model, nn.AdaptiveAvgPool2d(1), nn.Mish())
         self.dropout = dropout
 
-        self.backbone = SimChiaBlock(encoder, hidden_dim=hidden_dim, proj_dim=num_features, feat_dim=num_features)
+        self.backbone = NewChiaBlock(encoder, hidden_dim=hidden_dim, feat_dim=num_features)
         
         self.cancer = nn.Linear(hidden_dim, n_classes)
 
     def forward(self, x):
-        features, loss = self.backbone(x)
-        return self.cancer(F.dropout(features, self.dropout)), loss * 0.1
+        features = self.backbone(x)
+        return self.cancer(F.dropout(features, self.dropout)), None
 
 
 if "__main__" in __name__:
