@@ -1,19 +1,30 @@
 # Dataset options
-dataset_path: "/data/rsna-breast-cancer-detection/train_images_png"
+dataset_path: "/data/rsna-breast-cancer-detection/train_images_tiff_novoi"
 train_dataset: "/projects/rsna-breast-cancer-detection/src/dataset_info/train_ids.yaml"
 val_dataset: "/projects/rsna-breast-cancer-detection/src/dataset_info/val_ids.yaml"
 keep_num: 3
 neg_percent: 0.5
-color_space: 8
+color_space: 16
 train_workers: 8
 val_workers: 4
 test_workers: 4
 img_size: 1024
 smooth: 0.02
 
+# Loss infos
+pos_weight: 1
+l2_lambda: 5.e-5
+l2_layers: 
+- 'hidden'
+- 'cancer'
+- 'projection'
+
 # Augmentations
 augmentations:
-# From baseline
+# # From baseline
+# - ToFloat:
+#     max_value: 65535.0
+
 - Flip:
     p: 0.5
 
@@ -27,6 +38,13 @@ augmentations:
     height: 1024
     width: 1024
     p: 1
+
+- Perspective:  # Non fa tanto
+    p: .3
+
+# - FromFloat:
+#     max_value: 65535.0
+    
 
 
 # EXP TYPE

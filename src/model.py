@@ -13,33 +13,42 @@ from timeit import default_timer as timer
 import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 from torchmetrics.classification import BinaryAUROC
+from regularization import L2Regularization
+
 
 class RSNABCE(nn.Module):
     def __init__(self, args):
         super().__init__()
         self.args = args
-        
-        self.mean = (torch.tensor([0.485, 0.456, 0.406])*(2**self.args['color_space'] - 1)).to(self.args['device']).to(torch.float16)
-        self.std = (torch.tensor([0.229, 0.224, 0.225])*(2**self.args['color_space'] - 1)).to(self.args['device']).to(torch.float16)
 
-        self.criterion = nn.BCEWithLogitsLoss(pos_weight=self.args['pos_weight'] if 'pos_weight' in self.args.keys() else None)
+        self.mean = (torch.tensor([0.485, 0.456, 0.406])*(
+            2**self.args['color_space'] - 1)).to(self.args['device']).to(torch.float16)
+        self.std = (torch.tensor([0.229, 0.224, 0.225])*(
+            2**self.args['color_space'] - 1)).to(self.args['device']).to(torch.float16)
+
+        self.criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(
+            self.args['pos_weight']) if 'pos_weight' in self.args.keys() else None)
         self.metric = BinaryAUROC()
+        self.regularization = L2Regularization(
+            self.args['l2_lambda'], self.args['l2_layers'])
 
-        self.writer = SummaryWriter(log_dir=Path(args["exp_path"]) / Path("log_dir"))
+        self.writer = SummaryWriter(log_dir=Path(
+            args["exp_path"]) / Path("log_dir"))
 
         self.__init_model()
         self.__init_optim()
         self.__init_schedulers()
-    
+
     def __init_model(self):
         network_name = list(self.args['network'][0].keys())[0]
         network_params = list(self.args['network'][0].values())[0]
-        self.model: nn.Module = network.__dict__[network_name](**network_params)
-        
+        self.model: nn.Module = network.__dict__[
+            network_name](**network_params)
+
         self.model.to(self.args["device"])
-    
+
     def __init_optim(self):
-         # optimized using LARS with linear learning rate scaling
+        # optimized using LARS with linear learning rate scaling
         # (i.e. LearningRate = 0.3 × BatchSize/256) and weight decay of 10−6.
         self.optimizer = Adam(
             params=self.model.parameters(),
@@ -56,7 +65,7 @@ class RSNABCE(nn.Module):
         # )
         # schedulers['cosine_annealing'] = cosine_annealing
 
-        # # Add warmup 
+        # # Add warmup
         # warmup = torch.optim.lr_scheduler.CyclicLR(
         #     optimizer=optimizer,
         #     base_lr=1e-8,
@@ -71,33 +80,33 @@ class RSNABCE(nn.Module):
         #     optimizer=optimizer,
         #     base_lr=optimizer.param_groups[0]['lr'],
         #     max_lr=optimizer.param_groups[0]['lr'] / 10,
-        #     step_size_up = args['train_steps']*args['gradient_acc_iters'], 
+        #     step_size_up = args['train_steps']*args['gradient_acc_iters'],
         #     step_size_down = args['train_steps']*args['gradient_acc_iters'],
         #     cycle_momentum=False,
-        #     last_epoch=args['warmup_steps'] 
+        #     last_epoch=args['warmup_steps']
         # )
         # # cyclic_annealing = torch.optim.lr_scheduler.ChainedScheduler([cyclicLR, cosine_annealing])
         # schedulers['cyclic_lr'] = cyclic_lr
-        
-        print("ATTENTION: PLEASE use `try_lr.py` in order to find right gamma after changing anything among epochs, train_steps and acc size!")
-        train_steps = self.args['train_steps'] * self.args['gradient_acc_iters']
+
+        train_steps = self.args['train_steps'] * \
+            self.args['gradient_acc_iters']
         scheduler = CosineAnnealingWarmupRestarts(
             optimizer=self.optimizer,
-            first_cycle_steps = train_steps,
-            cycle_mult = 1.,
-            max_lr = self.args['lr'],
-            min_lr = self.args['lr'] / 500,
-            warmup_steps = train_steps // 5,
-            gamma = 1.,
-            last_epoch = -1
+            first_cycle_steps=train_steps,
+            cycle_mult=1.,
+            max_lr=self.args['lr'],
+            min_lr=self.args['lr'] / 500,
+            warmup_steps=train_steps // 5,
+            gamma=1.,
+            last_epoch=-1
         )
         self.schedulers['cosine_annealing_warmup_restarts'] = scheduler
 
-
     def save_model(self, epoch):
-        out_path = Path(self.args["exp_path"]) / Path(f"checkpoint_{epoch}.tar")
+        out_path = Path(self.args["exp_path"]) / \
+            Path(f"checkpoint_{epoch}.tar")
         torch.save(self.model.state_dict(), out_path)
-    
+
     def load_model(self, ckpt_path, device):
         self.model.to(device)
         ckpt = torch.load(ckpt_path, map_location=device)
@@ -107,28 +116,32 @@ class RSNABCE(nn.Module):
         # Add metrics
         targets = np.array(target)
         predictions = np.array(pred)
-        
+
         # Class 1
         beta_1, pf1_score_1 = best_pfbeta(targets, predictions)
         precision_1, recall_1 = precision_recall(targets, predictions > beta_1)
-        
+
         # Class 0
         labels_0 = np.logical_not(targets)
         predictions_0 = 1 - predictions
         beta_0, pf1_score_0 = best_pfbeta(labels_0, predictions_0)
-        precision_0, recall_0 = precision_recall(labels_0, predictions_0 > beta_0)
+        precision_0, recall_0 = precision_recall(
+            labels_0, predictions_0 > beta_0)
 
-        self.writer.add_scalars(f"{global_key}/beta", {'beta_0': beta_0, 'beta_1': beta_1}, num_images)
-        self.writer.add_scalars(f"{global_key}/pF1", {'pf1_score_0': pf1_score_0, 'pf1_score_1': pf1_score_1}, num_images)
-        self.writer.add_scalars(f"{global_key}/precision", {'precision_0': precision_0, 'precision_1': precision_1}, num_images)
-        self.writer.add_scalars(f"{global_key}/recall", {'recall_0': recall_0, 'recall_1': recall_1}, num_images)
-        
+        self.writer.add_scalars(
+            f"{global_key}/beta", {'beta_0': beta_0, 'beta_1': beta_1}, num_images)
+        self.writer.add_scalars(
+            f"{global_key}/pF1", {'pf1_score_0': pf1_score_0, 'pf1_score_1': pf1_score_1}, num_images)
+        self.writer.add_scalars(
+            f"{global_key}/precision", {'precision_0': precision_0, 'precision_1': precision_1}, num_images)
+        self.writer.add_scalars(
+            f"{global_key}/recall", {'recall_0': recall_0, 'recall_1': recall_1}, num_images)
+
         # Register AUC
         auc = self.metric(torch.tensor(predictions), torch.tensor(targets))
         self.writer.add_scalar(f"{global_key}/AUC", auc, num_images)
 
         return pf1_score_1, beta_1
-                
 
     def _train_batch(self, train_iter, num_images):
         total_train_loss = 0.
@@ -138,46 +151,52 @@ class RSNABCE(nn.Module):
         for _ in range(self.args['gradient_acc_iters']):
             train_batch = next(train_iter)
             train_images = train_batch[0].to(self.args['device'])
+
+            # Stack multiple images to imitate the third channel dimension
+            train_images = torch.cat(
+                [train_images, train_images, train_images], -3)
             # Normalize images
             train_images = normalize(
-                train_images, 
+                train_images,
                 mean=self.mean,
                 std=self.std
             )
+
             train_classes = train_batch[1].to(self.args['device'])
 
             # Actual training
             with autocast():
                 train_pred_logits, train_sim_loss = self.model(train_images)
-                train_cat_loss = self.criterion(train_pred_logits, train_classes)
-                if train_sim_loss is not None:
+                train_cat_loss = self.criterion(
+                    train_pred_logits, train_classes)
+                if self.args['projection_sim']:
                     train_loss = train_cat_loss + train_sim_loss
                 else:
                     train_loss = train_cat_loss
-                
+
                 # Accumulate gradient
                 train_loss = train_loss / self.args['gradient_acc_iters']
+                reg = self.regularization(self.model) / self.args['gradient_acc_iters']
 
-            self.scaler.scale(train_loss).backward()
-            
+            # Add L2 regularization
+            self.scaler.scale(train_loss + reg).backward()
+
             # Accumulate train loss
             total_train_loss += train_loss.item()
-            if train_sim_loss is not None:
-                total_train_cat_loss += train_cat_loss.item() / self.args['gradient_acc_iters']
-                total_train_sim_loss += train_sim_loss.item() / self.args['gradient_acc_iters']
+            total_train_cat_loss += train_cat_loss.item() / self.args['gradient_acc_iters']
+            total_train_sim_loss += train_sim_loss.item() / self.args['gradient_acc_iters']
 
             # Set the number of patients that the network has seen.
             # This is useful when comparing multiple networks.
             # This value will be used all over the method
             num_images += self.args['batch_size']
-            
+
             # Update batch scheduler
             self.schedulers['cosine_annealing_warmup_restarts'].step()
 
-            
             # Print some info
             lr = self.optimizer.param_groups[0]["lr"]
-            
+
             # Add lr to tensorboard
             self.writer.add_scalar("Misc/LR", lr, num_images)
 
@@ -187,16 +206,15 @@ class RSNABCE(nn.Module):
         # Reset optimizer
         self.optimizer.zero_grad()
 
-        scalars = {"train_total": total_train_loss}
-        if train_sim_loss is not None:
-            scalars.update({
-                "train_cat":  total_train_cat_loss,
-                "train_sim": total_train_sim_loss
-            })
+        scalars = {
+            "train_total": total_train_loss,
+            "train_cat":  total_train_cat_loss,
+            "train_sim": total_train_sim_loss
+        }
         self.writer.add_scalars("Loss", scalars, num_images)
 
         return total_train_loss, num_images
-    
+
     def _eval_model(self, loader, num_images, mode):
         self.model.eval()
         total_loss = 0.
@@ -207,9 +225,11 @@ class RSNABCE(nn.Module):
         for batch in tqdm(loader, desc=f'{mode}...'):
             # Fetch data
             images = batch[0].to(self.args['device'])
+
+            images = torch.cat([images, images, images], -3)
             # Normalize images
             images = normalize(
-                images, 
+                images,
                 mean=self.mean,
                 std=self.std
             )
@@ -219,22 +239,21 @@ class RSNABCE(nn.Module):
                 pred_logits = self.model(images)
                 pred_logits, sim_loss = pred_logits
                 cat_loss = self.criterion(pred_logits, classes)
-                if sim_loss is not None:
+                if self.args['projection_sim']:
                     loss = cat_loss + sim_loss
                 else:
                     loss = cat_loss
 
                 # Remember predictions and targets
                 targets += classes.squeeze(-1).tolist()
-                predictions += torch.sigmoid(pred_logits).cpu().squeeze(-1).tolist()
-            
+                predictions += torch.sigmoid(
+                    pred_logits).cpu().squeeze(-1).tolist()
+
             # Accumulate val loss
             total_loss += loss.item()
-            if sim_loss is not None:
-                total_cat_loss += cat_loss.item()
-                total_sim_loss += sim_loss.item()
+            total_cat_loss += cat_loss.item()
+            total_sim_loss += sim_loss.item()
 
-        
         scalars = {
             f"{mode}_total": total_loss / len(loader)}
         if sim_loss is not None:
@@ -247,7 +266,7 @@ class RSNABCE(nn.Module):
         return predictions, targets
 
     def train(self, train_loader, val_loader, test_loader):
-        
+
         # Make train_loader and val_loader as iterators, so it's possible to iterate over them indefinitely
         self.scaler = GradScaler()
 
@@ -255,9 +274,11 @@ class RSNABCE(nn.Module):
         start_time = timer()
         for epoch in range(self.args['epochs']):
             elapsed_time = timer() - start_time
-            remaining_time = (self.args['epochs'] - (epoch + 1)) * elapsed_time / (epoch+1)
+            remaining_time = (self.args['epochs'] -
+                              (epoch + 1)) * elapsed_time / (epoch+1)
             time_string = f"{round(elapsed_time // 60):n}:{round(elapsed_time % 60):n} < {round(remaining_time // 60):n}:{round(elapsed_time % 60):n}"
-            print(f"############ EPOCH {epoch + 1}/{self.args['epochs']}\tTime:{time_string} ############")
+            print(
+                f"############ EPOCH {epoch + 1}/{self.args['epochs']}\tTime:{time_string} ############")
             # print(f"############ EPOCH {epoch + 1}/{self.args['epochs']} ############")
 
             ############
@@ -294,6 +315,17 @@ class RSNABCE(nn.Module):
 
             self.writer.flush()
 
+    def eval(self, test_loader, num_images, global_key="DDSM_Metric"):
+        test_predictions, test_targets = self._eval_model(
+            test_loader, num_images, mode='test')
+        test_pf1_score_1, test_beta_1 = self._register_metrics(
+            test_predictions, test_targets, num_images, global_key=global_key)
+
+        print(
+            f"Found best F1 of {test_pf1_score_1:.4f} at beta {test_beta_1:.2f}.")
+
+        self.writer.flush()
+
     def _set_learning_rate(self, new_lrs):
         if not isinstance(new_lrs, list):
             new_lrs = [new_lrs] * len(self.optimizer.param_groups)
@@ -305,11 +337,11 @@ class RSNABCE(nn.Module):
 
         for param_group, new_lr in zip(self.optimizer.param_groups, new_lrs):
             param_group["lr"] = new_lr
-        
-    def range_test(self, train_loader, val_loader, max_lr, min_lr, num_iters):
+
+    def range_test(self, train_loader, val_loader, min_lr, num_iters=70):
         lrs = []
         losses = []
-        
+
         writer = open('lrfinder.txt', 'w')
         # Make train_loader as iterators, so it's possible to iterate over them indefinitely
         train_iter = iter(train_loader)
@@ -318,102 +350,110 @@ class RSNABCE(nn.Module):
         self.model.train()
         self._set_learning_rate(min_lr)
         iterator = tqdm(range(num_iters))
-        scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=1.25)
-        for step in iterator:
-            # Set initial LR
-            self._set_learning_rate(scheduler.get_last_lr()[0])
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(
+            self.optimizer, gamma=1.18)
+        try:
+            for step in iterator:
+                # Set initial LR
+                self._set_learning_rate(scheduler.get_last_lr()[0])
 
-            lr = self.optimizer.param_groups[0]["lr"]
-            iterator.set_description(f"Testing LR: {lr:.6f}")
+                lr = self.optimizer.param_groups[0]["lr"]
+                iterator.set_description(f"Testing LR: {lr:.6f}")
 
-            # Actual training
-            total_train_loss = 0.
-            accum_steps = self.args['gradient_acc_iters']
-            for _ in range(accum_steps):
-                # Fetch data
-                train_batch = next(train_iter)
-                train_images = train_batch[0].to(self.args['device'])
-                # Normalize images
-                train_images = normalize(
-                    train_images, 
-                    mean=self.mean,
-                    std=self.std
-                )
-                train_classes = train_batch[1].to(self.args['device'])
-                with autocast():
-                    train_pred_logits, train_sim_loss = self.model(train_images)
-                    train_cat_loss = self.criterion(train_pred_logits, train_classes)
-                    if train_sim_loss is not None:
-                        train_loss = train_cat_loss + train_sim_loss
-                    else:
-                        train_sim_loss = torch.zeros(1)
-                        train_loss = train_cat_loss
-                    
-                    # Accumulate gradient
-                    train_loss = train_loss / accum_steps
+                # Actual training
+                total_train_loss = 0.
+                for _ in range(self.args['gradient_acc_iters']):
+                    # Fetch data
+                    train_batch = next(train_iter)
+                    train_images = train_batch[0].to(self.args['device'])
 
-                scaler.scale(train_loss).backward()
-                total_train_loss += train_loss.item()
+                    train_images = torch.cat([train_images, train_images, train_images], -3)
 
-            # Update optimizer
-            scaler.step(self.optimizer)
-            scaler.update()
-            # Reset optimizer
-            self.optimizer.zero_grad()
+                    # Normalize images
+                    train_images = normalize(
+                        train_images,
+                        mean=self.mean,
+                        std=self.std
+                    )
+                    train_classes = train_batch[1].to(self.args['device'])
+                    with autocast():
+                        train_pred_logits, train_sim_loss = self.model(
+                            train_images)
+                        train_cat_loss = self.criterion(
+                            train_pred_logits, train_classes)
+                        if train_sim_loss is not None:
+                            train_loss = train_cat_loss + train_sim_loss
+                        else:
+                            train_sim_loss = torch.zeros(1)
+                            train_loss = train_cat_loss
 
-            # Test model on val loader
-            total_val_loss = 0.
-            for val_batch in val_loader:
-                # Fetch data
-                val_images = val_batch[0].to(self.args['device'])
-                # Normalize images
-                val_images = normalize(
-                    val_images, 
-                    mean=self.mean,
-                    std=self.std
-                )
-                val_classes = val_batch[1].to(self.args['device'])
+                        # Accumulate gradient
+                        train_loss = train_loss / self.args['gradient_acc_iters']
+                        reg = self.regularization(self.model) / self.args['gradient_acc_iters']
 
-                with torch.no_grad():
-                    val_pred_logits = self.model(val_images)
-                    val_pred_logits, val_sim_loss = val_pred_logits
-                    val_cat_loss = self.criterion(val_pred_logits, val_classes)
-                    if val_sim_loss is not None:
-                        val_loss = val_cat_loss + val_sim_loss
-                    else:
-                        val_sim_loss = torch.zeros(1)
-                        val_loss = val_cat_loss
+                    # Add L2 regularization
+                    # Replaces pow(2.0) with abs() for L1 regularization
+                    # l2_norm = sum(p.pow(2.0).sum() for p in self.model.parameters())
+                    if train_loss.item() > 10:
+                        raise ValueError("Finished")
+                    scaler.scale(train_loss + reg).backward()
+                    total_train_loss += train_loss.item()
 
-                total_val_loss += val_loss.item()
-            
-            # Keep track of lrs and losses
-            lrs.append(lr)
-            losses.append(total_val_loss / len(val_loader))
+                # Update optimizer
+                scaler.step(self.optimizer)
+                scaler.update()
+                # Reset optimizer
+                self.optimizer.zero_grad()
 
-            # Write it to disk
-            writer.write(f"{total_val_loss / len(val_loader)} {lr}\n")
-            writer.flush()
+                # Test model on val loader
+                total_val_loss = 0.
+                for val_batch in val_loader:
+                    # Fetch data
+                    val_images = val_batch[0].to(self.args['device'])
+                    val_images = torch.cat([val_images, val_images, val_images], -3)
+                    # Normalize images
+                    val_images = normalize(
+                        val_images,
+                        mean=self.mean,
+                        std=self.std
+                    )
+                    val_classes = val_batch[1].to(self.args['device'])
 
-            # Reset model and optimizers
-            self.__init_model()
-            self.__init_optim()
-            # self.model.load_state_dict(self.model_state_dict)
-            # self.optimizer.load_state_dict(self.optim_state_dict)
+                    with torch.no_grad():
+                        val_pred_logits = self.model(val_images)
+                        val_pred_logits, val_sim_loss = val_pred_logits
+                        val_cat_loss = self.criterion(
+                            val_pred_logits, val_classes)
+                        if val_sim_loss is not None:
+                            val_loss = val_cat_loss + val_sim_loss
+                        else:
+                            val_sim_loss = torch.zeros(1)
+                            val_loss = val_cat_loss
 
-            scheduler.step()
+                    total_val_loss += val_loss.item()
 
-        
+                # Keep track of lrs and losses
+                lrs.append(lr)
+                losses.append(total_val_loss / len(val_loader))
+
+                # Write it to disk
+                writer.write(f"{total_val_loss / len(val_loader)} {lr}\n")
+                writer.flush()
+
+                # Reset model and optimizers
+                self.__init_model()
+                self.__init_optim()
+                # self.model.load_state_dict(self.model_state_dict)
+                # self.optimizer.load_state_dict(self.optim_state_dict)
+
+                scheduler.step()
+        except ValueError:
+            pass
+
         writer.close()
 
         import matplotlib.pyplot as plt
         plt.plot(lrs, losses)
-        plt.ticklabel_format(style='sci', axis='x', scilimits=(1,4))
+        plt.ticklabel_format(style='sci', axis='x', scilimits=(1, 4))
         plt.xscale('log')
         plt.savefig('lrfinder.png')
-
-
-
-
-
-
-

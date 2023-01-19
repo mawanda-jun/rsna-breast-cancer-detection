@@ -13,6 +13,12 @@ smooth: 0.02
 
 # Augmentations
 augmentations:
+- CoarseDropout:
+    max_holes: 4
+    max_height: 64
+    max_width: 64
+    fill_value: 255
+    p: 0.1
 # From baseline
 - Flip:
     p: 0.5

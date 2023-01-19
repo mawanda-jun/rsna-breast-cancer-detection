@@ -9,6 +9,7 @@ from yaml import CSafeLoader
 import numpy as np
 from PIL import Image
 from albumentations import Compose, Resize
+from tqdm import tqdm
 
 random.seed(42)
 
@@ -51,7 +52,7 @@ class RSNA_BCD_Dataset(Dataset):
     def __getitem__(self, patient_id_laterality):
         img_ids, categories = self.patient_ids[patient_id_laterality]
         patient_id = patient_id_laterality.split("_")[0]
-        img_paths = [self.dataset_path / Path(str(patient_id)) / Path(f"{img_id}.png") for img_id in img_ids]
+        img_paths = [self.dataset_path / Path(str(patient_id)) / Path(f"{img_id}.tiff") for img_id in img_ids]
         random.shuffle(img_paths)  # So that, in case there are more then 3, we select always different images.
         # Keep always <keep_num> images. If there are less, repeat present images
         if self.keep_num is not None:
@@ -61,7 +62,7 @@ class RSNA_BCD_Dataset(Dataset):
             if len(img_paths) > self.keep_num:
                 img_paths = img_paths[:self.keep_num]
 
-        imgs = [self.__gray_to_rgb(np.array(Image.open(img_path))) for img_path in img_paths]
+        imgs = [np.expand_dims(np.array(Image.open(img_path)), -1) for img_path in img_paths]
         # # Keep always <keep_num> images. If there are less, add an empty image
         # while len(imgs) < self.keep_num:
         #     imgs.append(np.zeros_like(imgs[0]))
@@ -91,8 +92,8 @@ class RSNA_BCD_Dataset(Dataset):
         images = []
         categories = []
         for block in batch:
-            # Convert block to int16 so there are no problems of uint8 or uint16
-            img = np.array(block[0]).astype(np.int16)
+            # Convert block to int32 so there are no problems of uint8 or uint16
+            img = np.array(block[0]).astype(np.int32)
             # Here image comes as (G, H, W, C).
             img = torch.tensor(img).permute(0, 3, 1, 2)
             label = torch.tensor(np.array(block[1]))
@@ -133,15 +134,15 @@ class TrainBatchSampler(Sampler):
                     if pos_avail.sum() == 0:  # Reset indexes since they are exausted!
                         pos_avail = np.ones(len(self.positives), dtype=np.bool)
                     # Select positive index
-                    pos = np.random.choice(positives[pos_avail], replace=False)
+                    pos = np.random.choice(positives[pos_avail])
                     pos_avail[pos] = False
                     batch.append(self.positives[pos])
                 else:
                     if neg_avail.sum() == 0:  # Reset indexes since they are exausted!
                         neg_avail = np.ones(len(self.negatives), dtype=np.bool)
-                    neg = np.random.choice(negatives[neg_avail], replace=False)
+                    neg = np.random.choice(negatives[neg_avail])
                     neg_avail[neg] = False
-                    batch.append(self.negatives[pos])
+                    batch.append(self.negatives[neg])
             yield batch
 
     def __iter__(self):
@@ -209,8 +210,8 @@ def visualize_augs(augs_path):
         transform=transforms
     )
     imgs = []
-    edge = 5
-    for i in range(edge**2):
+    edge = 25
+    for i in tqdm(range(edge**2)):
         patient_id = list(dataset.patient_ids.keys())[i]
         img, label = dataset[patient_id]
         imgs.append(img[0])
@@ -224,27 +225,27 @@ def visualize_augs(augs_path):
 
 
 if "__main__" in __name__:
-    transform = Compose([Resize(1024, 1024, p=1)])
-    dataset = RSNA_BCD_Dataset(
-        dataset_path=Path("/data/rsna-breast-cancer-detection/train_images_png"), 
-        patient_ids_path=Path("/projects/rsna-breast-cancer-detection/src/dataset_info/train_ids.yaml"), 
-        keep_num=3,
-        smooth=0.05,
-        transform=transform
-    )
-    batch_size = 20
-    dataloader = DataLoader(
-        dataset=dataset,
-        batch_sampler=TrainBatchSampler(dataset, batch_size, 0.5),
-        collate_fn=dataset.collate_fn,
-        num_workers=1,
-        pin_memory=True
-    )
+    # transform = Compose([Resize(1024, 1024, p=1)])
+    # dataset = RSNA_BCD_Dataset(
+    #     dataset_path=Path("/data/rsna-breast-cancer-detection/train_images_png"), 
+    #     patient_ids_path=Path("/projects/rsna-breast-cancer-detection/src/dataset_info/train_ids.yaml"), 
+    #     keep_num=3,
+    #     smooth=0.05,
+    #     transform=transform
+    # )
+    # batch_size = 20
+    # dataloader = DataLoader(
+    #     dataset=dataset,
+    #     batch_sampler=TrainBatchSampler(dataset, batch_size, 0.5),
+    #     collate_fn=dataset.collate_fn,
+    #     num_workers=1,
+    #     pin_memory=True
+    # )
 
-    for i, data in enumerate(dataloader):
-        print(i, data[0].shape, data[1].shape)
-    # augs_path = "/projects/rsna-breast-cancer-detection/src/all_augs.yaml"
-    # visualize_augs(augs_path)
+    # for i, data in enumerate(dataloader):
+    #     print(i, data[0].shape, data[1].shape)
+    augs_path = "/projects/rsna-breast-cancer-detection/src/all_augs.yaml"
+    visualize_augs(augs_path)
         
 
         

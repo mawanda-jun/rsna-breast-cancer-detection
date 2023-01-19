@@ -28,6 +28,13 @@ augmentations:
     width: 1024
     p: 1
 
+- CLAHE:  # Contrast greatily changes!
+    clip_limit: 2.5
+    tile_grid_size:
+    - 16
+    - 16
+    p: 0.5
+
 
 # EXP TYPE
 network: 
@@ -36,8 +43,8 @@ network:
 #       hidden_dim: 1024
 #       dropout: 0.
 - SimChiaEfficientNet:
-    backbone: v2_s
-    hidden_dim: 1024
+    backbone: v2_m
+    hidden_dim: 2048
     dropout: 0.1
 
 # Training options
@@ -45,14 +52,14 @@ network:
 # We want the network to see 100K images
 # wanted train images per epoch: ~2000
 # wanted val images per epoch: 20% of train images -> 500
-batch_size: 4  # 13
-gradient_acc_iters: 30  # 4
+batch_size: 2  # 13
+gradient_acc_iters: 60  # 4
 # Optimizer options
 weight_decay: 1.e-6
 momentum: 0.9
 eps: 1.e-8
 device: cuda:0
-lr: 5.e-4
+lr: 3.e-5
 warmup_steps: 100
 # Total epochs. This is just a reference number, as it is not linked on how many passes we have done in the dataset.
 # the 

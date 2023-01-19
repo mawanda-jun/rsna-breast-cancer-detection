@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package FileFormat;
+
+message PBImage { 
+    uint32 shape0 = 1;
+    uint32 shape1 = 2;
+    uint32 depth = 3;
+    repeated uint32 data = 4 [packed=true];
+}

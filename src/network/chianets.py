@@ -16,7 +16,8 @@ def eff_selection(model_type):
     elif model_type == "b4":
         model = efficientnet_b4(weights=EfficientNet_B4_Weights.IMAGENET1K_V1)
     elif model_type == 'v2_s':
-        model = efficientnet_v2_s(weights=EfficientNet_V2_S_Weights.IMAGENET1K_V1)
+        model = efficientnet_v2_s(weights=None)
+        model.load_state_dict(torch.load("/data/rsna-breast-cancer-detection/.cache/efficientnet_v2_s-dd5fe13b.pth"))
     elif model_type == 'v2_m':
         model = efficientnet_v2_m(weights=EfficientNet_V2_M_Weights.IMAGENET1K_V1)
     elif model_type == 'v2_l':
@@ -186,7 +187,7 @@ class SimChiaEfficientNet(nn.Module):
         self.encoder = nn.Sequential(model, nn.AdaptiveAvgPool2d(1), nn.Mish())
 
         self.projection = nn.Linear(num_features, proj_dim)
-        self.fc = nn.Linear(num_features, hidden_dim)
+        self.hidden = nn.Linear(num_features, hidden_dim)
         self.cancer = nn.Linear(hidden_dim, n_classes)
         
         self.criterion = nn.CosineEmbeddingLoss()
@@ -199,7 +200,7 @@ class SimChiaEfficientNet(nn.Module):
         feats = feats.reshape((B, V, -1))
         
         # Calculate output
-        outputs = torch.stack([self.fc(feat) for feat in feats.transpose(1, 0)], 1)
+        outputs = torch.stack([self.hidden(feat) for feat in feats.transpose(1, 0)], 1)
         outputs = torch.mean(outputs, 1)
         outputs = F.dropout(outputs, self.dropout_rate)
         outputs = F.mish(outputs)

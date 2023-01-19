@@ -28,6 +28,11 @@ augmentations:
     width: 1024
     p: 1
 
+- RandomBrightnessContrast:
+    brightness_limit: 0.05  # aumenta anche il fondo, poco interessante!
+    contrast_limit: 0.2  # Aumenta o diminuisce il contrasto, interessante per rendere piu' difficile l'identificazione
+    p: 0.3
+
 
 # EXP TYPE
 network: 

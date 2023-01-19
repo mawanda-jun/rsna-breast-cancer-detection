@@ -38,6 +38,7 @@ network:
 - SimChiaEfficientNet:
     backbone: v2_s
     hidden_dim: 1024
+    proj_dim: 512
     dropout: 0.1
 
 # Training options

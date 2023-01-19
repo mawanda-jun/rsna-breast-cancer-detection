@@ -27,8 +27,8 @@ augmentations:
 # - ElasticTransform:  # non fa tanto ed e' pesantissima
 #     p: 0.5
 - Resize:
-    height: 512
-    width: 512
+    height: 128
+    width: 128
     p: 1
 # COLOR
 # - ToFloat:
@@ -46,8 +46,13 @@ augmentations:
 # - RandomGamma:  # Nothing visible
 #     p: 0.5
 # - CLAHE:  # Contrast greatily changes!
-#     clip_limit: 4
-#     p: 0.5
+#     clip_limit: 
+#     - 2.5
+#     - 2.5
+#     tile_grid_size:
+#     - 16
+#     - 16
+#     p: 1.
 # - GaussianBlur:  # Might break low-detail features
 #     p: 0.2
 # - ImageCompression:  # Might break low-detail features

@@ -27,6 +27,9 @@ augmentations:
     height: 1024
     width: 1024
     p: 1
+    
+- ISONoise:  # Important augmentation for adding (good) noise
+    p: 0.2
 
 
 # EXP TYPE

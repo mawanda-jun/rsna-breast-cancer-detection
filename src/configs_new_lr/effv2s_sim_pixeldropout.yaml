@@ -28,6 +28,10 @@ augmentations:
     width: 1024
     p: 1
 
+- PixelDropout:  # Must see if it's working: white pixels on the white part is not great!
+    drop_value: 0
+    p: 0.2
+
 
 # EXP TYPE
 network: 

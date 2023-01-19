@@ -1,15 +1,23 @@
 # Dataset options
-dataset_path: "/data/rsna-breast-cancer-detection/train_images_png"
+dataset_path: "/data/rsna-breast-cancer-detection/train_images_12"
 train_dataset: "/projects/rsna-breast-cancer-detection/src/dataset_info/train_ids.yaml"
 val_dataset: "/projects/rsna-breast-cancer-detection/src/dataset_info/val_ids.yaml"
 keep_num: 3
 neg_percent: 0.5
-color_space: 8
+color_space: 12
 train_workers: 8
 val_workers: 4
 test_workers: 4
 img_size: 1024
-smooth: 0.02
+smooth: 0.05
+
+# Loss infos
+pos_weight: 1
+l2_lambda: 0. # 4.e-5
+l2_layers: 
+- 'hidden'
+- 'cancer'
+- 'projection'
 
 # Augmentations
 augmentations:
@@ -18,8 +26,8 @@ augmentations:
     p: 0.5
 
 - ShiftScaleRotate:
-    shift_limit: 0.5
-    scale_limit: 0.5
+    shift_limit: 0.7
+    scale_limit: 0.7
     rotate_limit: 180
     p: .5
     
@@ -30,6 +38,7 @@ augmentations:
 
 
 # EXP TYPE
+projection_sim: false
 network: 
 #   - ChiaResNet:
 #       backbone: resnet50  # resnext101_32x8d, resnet50
@@ -41,10 +50,8 @@ network:
     dropout: 0.1
 
 # Training options
-# Dataset is ~24K images (but 500 positives)
-# We want the network to see 100K images
-# wanted train images per epoch: ~2000
-# wanted val images per epoch: 20% of train images -> 500
+# Dataset is ~24K patients (but only 500 positives)
+# We want the network to see 180K patient
 batch_size: 4  # 13
 gradient_acc_iters: 30  # 4
 # Optimizer options
@@ -52,11 +59,11 @@ weight_decay: 1.e-6
 momentum: 0.9
 eps: 1.e-8
 device: cuda:0
-lr: 5.e-4
+lr: 3.e-4
 warmup_steps: 100
 # Total epochs. This is just a reference number, as it is not linked on how many passes we have done in the dataset.
 # the 
-epochs: 60
+epochs: 90
 # Set train, val and test frequencies
 save_epochs: 10  # Await x epochs, then save.
 train_steps: 25  # 154  # Train for n minibatches. ~ 2000 / 13

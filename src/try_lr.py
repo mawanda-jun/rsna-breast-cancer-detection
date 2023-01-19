@@ -141,7 +141,7 @@ def init_schedulers(init_lr, epochs, steps_per_epoch):
     #     last_epoch = -1
     # )
     # schedulers['try'] = clr
-    exponential = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=1.25)
+    exponential = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=1.18)
     schedulers['exponential'] = exponential
 
     return optimizer, schedulers
@@ -151,8 +151,8 @@ def main():
     # steps_per_epoch = 154 * 4
     # init_lr = 2.e-4
     # final_lr = 1.e-6
-    epochs = 50
-    steps_per_epoch = 10
+    epochs = 70
+    steps_per_epoch = 40
     init_lr = 1e-6
 
     optimizer, schedulers = init_schedulers(init_lr, epochs, steps_per_epoch)

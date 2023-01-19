@@ -28,6 +28,10 @@ augmentations:
     width: 1024
     p: 1
 
+- RandomToneCurve:
+    scale: .3
+    p: 0.2
+
 
 # EXP TYPE
 network: 

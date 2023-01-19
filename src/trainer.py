@@ -72,7 +72,6 @@ def main(cfg_path: str):
     with open(Path(args['exp_path']) / Path("config.yaml"), 'w') as writer:
         yaml.safe_dump(data=args, stream=writer, sort_keys=False)
     
-   
     # # Find best LR
     # model = RSNABCE(args)
     # lr_set = RSNA_BCD_Dataset(
@@ -89,13 +88,13 @@ def main(cfg_path: str):
     #     num_workers=args['train_workers'],
     #     pin_memory=True
     # )
-    # model.range_test(lr_loader, val_loader, max_lr=1e-2, min_lr=1e-6, num_iters=50)
+    # model.range_test(lr_loader, val_loader, min_lr=1e-5, num_iters=60)
 
     # Define and train model
     RSNABCE(args).train(train_loader, val_loader, test_loader)
 
 if "__main__" in __name__:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--path", type=str, help="path/to/config.yaml", default="/projects/rsna-breast-cancer-detection/src/configs_new_lr/effv2s_sim_heavyshift.yaml")
+    parser.add_argument("--path", type=str, help="path/to/config.yaml", default="/projects/rsna-breast-cancer-detection/src/configs_12bits/effv2s_sim_12_heavyshift.yaml")
     args = parser.parse_args()
     main(args.path)

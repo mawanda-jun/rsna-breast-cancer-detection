@@ -11,6 +11,10 @@ test_workers: 4
 img_size: 1024
 smooth: 0.02
 
+# Loss infos
+pos_weight: 1
+l2_lambda: 0.
+
 # Augmentations
 augmentations:
 # From baseline
@@ -56,7 +60,7 @@ lr: 5.e-4
 warmup_steps: 100
 # Total epochs. This is just a reference number, as it is not linked on how many passes we have done in the dataset.
 # the 
-epochs: 60
+epochs: 120
 # Set train, val and test frequencies
 save_epochs: 10  # Await x epochs, then save.
 train_steps: 25  # 154  # Train for n minibatches. ~ 2000 / 13

@@ -28,6 +28,10 @@ augmentations:
     width: 1024
     p: 1
 
+- CLAHE:  # Contrast greatily changes!
+    clip_limit: 2
+    p: 0.3
+
 
 # EXP TYPE
 network: 

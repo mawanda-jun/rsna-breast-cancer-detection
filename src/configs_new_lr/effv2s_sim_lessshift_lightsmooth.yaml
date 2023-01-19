@@ -18,7 +18,7 @@ augmentations:
     p: 0.5
 
 - ShiftScaleRotate:
-    shift_limit: 0.5
+    shift_limit: 0.2
     scale_limit: 0.5
     rotate_limit: 180
     p: .5

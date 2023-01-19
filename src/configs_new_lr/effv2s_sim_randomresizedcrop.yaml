@@ -13,6 +13,13 @@ smooth: 0.02
 
 # Augmentations
 augmentations:
+ - RandomResizedCrop:
+    height: 2048
+    width: 2048
+    scale: 
+    - 0.4
+    - 1.0
+    p: 0.5
 # From baseline
 - Flip:
     p: 0.5

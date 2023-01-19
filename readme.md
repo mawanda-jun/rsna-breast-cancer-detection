@@ -23,3 +23,9 @@
 ### Losses
 - Dice loss seems to be the most promising. Might use also other.
 
+### TODO
+1. Find LR for v2s models, batch size 60
+2. Val loss is too high! We must reduce it. It might be due to the fact that the positives are too easy during training, and overfitting (for the positives) occurs:
+    - less positives? But we like balanced trainings!
+    - weighted loss, where errors on positives counts more?
+

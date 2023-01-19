@@ -13,20 +13,46 @@ smooth: 0.02
 
 # Augmentations
 augmentations:
+ - RandomResizedCrop:
+    height: 2048
+    width: 2048
+    scale: 
+    - 0.4
+    - 1.0
+    p: 0.5
+- CoarseDropout:
+    max_holes: 4
+    max_height: 64
+    max_width: 64
+    fill_value: 255
+    p: 0.1
 # From baseline
 - Flip:
     p: 0.5
-
 - ShiftScaleRotate:
     shift_limit: 0.5
     scale_limit: 0.5
     rotate_limit: 180
     p: .5
-    
 - Resize:
     height: 1024
     width: 1024
     p: 1
+- CLAHE:  # Contrast greatily changes!
+    clip_limit: 2
+    p: 0.2
+- RandomBrightnessContrast:
+    brightness_limit: 0.05  # aumenta anche il fondo, poco interessante!
+    contrast_limit: 0.2  # Aumenta o diminuisce il contrasto, interessante per rendere piu' difficile l'identificazione
+    p: 0.2
+- RandomToneCurve:
+    scale: .3
+    p: 0.1
+- PixelDropout:  # Must see if it's working: white pixels on the white part is not great!
+    drop_value: 0
+    p: 0.1
+- ISONoise:  # Important augmentation for adding (good) noise
+    p: 0.1
 
 
 # EXP TYPE
@@ -52,11 +78,11 @@ weight_decay: 1.e-6
 momentum: 0.9
 eps: 1.e-8
 device: cuda:0
-lr: 5.e-4
+lr: 3.e-4
 warmup_steps: 100
 # Total epochs. This is just a reference number, as it is not linked on how many passes we have done in the dataset.
 # the 
-epochs: 60
+epochs: 120
 # Set train, val and test frequencies
 save_epochs: 10  # Await x epochs, then save.
 train_steps: 25  # 154  # Train for n minibatches. ~ 2000 / 13
